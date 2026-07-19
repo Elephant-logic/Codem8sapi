@@ -1,8 +1,8 @@
 {
   "name": "codem8s-render",
-  "version": "10.0.0",
+  "version": "10.1.0",
   "private": true,
-  "description": "Render-ready Codem8s with a server-side OpenAI proxy.",
+  "description": "Render-ready Codem8s with secure OpenAI proxy and scoped repair diagnostics.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
