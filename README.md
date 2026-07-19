@@ -1,18 +1,27 @@
-# Codem8s Render v10
+# Codem8s Render v10.1
+
+Render-ready Codem8s with a server-side OpenAI proxy.
+
+## What changed in v10.1
+
+- AI repairs are scoped to the files linked to the detected failure.
+- Repair responses are merged instead of replacing the whole project.
+- `.env.example`, `.gitignore`, `render.yaml`, and lockfiles are protected.
+- Opaque `data:` JavaScript errors are converted into clearer project-file diagnostics where possible.
+- Config files are not treated as regressions merely because a partial repair omitted them.
+- The health endpoint reports the active repair-pipeline version.
 
 ## Deploy on Render
 
-1. Upload this folder to a GitHub repository.
-2. In Render, choose **New → Blueprint** and connect the repository.
-   - Alternatively choose **New → Web Service**.
-3. Add the environment variable:
+1. Connect this repository to a Render **Web Service** or Blueprint.
+2. Add the environment variable:
    - Key: `OPENAI_API_KEY`
    - Value: your OpenAI API key
-4. Deploy.
+3. Deploy.
 
 The browser never receives the API key. Requests go to `/api/openai`, and the Node server adds the secret.
 
-## Manual Web Service settings
+## Render settings
 
 - Runtime: Node
 - Build Command: `npm install`
