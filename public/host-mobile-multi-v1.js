@@ -2,6 +2,23 @@
   const frame=document.getElementById('codem8s-app'),STORE='codem8s_app_store_v1';
   const win=()=>frame?.contentWindow,doc=()=>{try{return frame?.contentDocument}catch{return null}};
   const badge=document.getElementById('codem8s-version');if(badge)badge.textContent='Codem8s 10.9.0';
+  async function cleanOldRootInstaller(){
+    try{
+      if('serviceWorker'in navigator){
+        const root=new URL('/',location.origin).href;
+        for(const registration of await navigator.serviceWorker.getRegistrations()){
+          const script=registration.active?.scriptURL||registration.waiting?.scriptURL||registration.installing?.scriptURL||'';
+          if(registration.scope===root&&/\/mobile-app-sw\.js(?:$|\?)/.test(script))await registration.unregister();
+        }
+      }
+      if('caches'in window){
+        for(const key of await caches.keys()){
+          if(['codem8s-mobile-shell-v1','codem8s-mobile-shell-v2','codem8s-mobile-identities-v1'].includes(key))await caches.delete(key);
+        }
+      }
+    }catch{}
+  }
+  cleanOldRootInstaller();
   function apps(){try{return JSON.parse(win().localStorage.getItem(STORE)||'[]')}catch{return[]}}
   function put(items){win().localStorage.setItem(STORE,JSON.stringify(items.slice(0,40)))}
   function safe(id){return String(id||'app').replace(/[^a-z0-9_-]/gi,'-')}
