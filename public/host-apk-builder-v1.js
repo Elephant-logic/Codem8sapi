@@ -4,6 +4,7 @@
   const appWin = () => frame?.contentWindow;
   const appDoc = () => { try { return frame?.contentDocument; } catch { return null; } };
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   function apps() { try { return JSON.parse(appWin()?.localStorage.getItem(STORE) || '[]'); } catch { return []; } }
   function framework(project) {
     const names = Object.keys(project?.files || {});
@@ -24,6 +25,7 @@
     const entry = names.find(name => /(^|\/)index\.html?$/i.test(name)) || names.find(name => /\.html?$/i.test(name));
     if (!entry) throw new Error('No HTML entry file was found for the APK.');
     let html = String(files[entry] || '');
+    if (!html.trim()) throw new Error('The saved app has an empty index.html. Open the app and regenerate or restore that file before building.');
     html = html.replace(/<link\b([^>]*?)href=["']([^"']+)["']([^>]*)>/gi, (all, before, ref) => {
       const local = norm(entry, ref);
       return files[local] != null && /\.css$/i.test(local) ? `<style>${files[local]}</style>` : all;
@@ -61,22 +63,57 @@
     panel.querySelector('[data-close]').onclick = () => panel.remove();
     return { panel, state: panel.querySelector('[data-state]'), actions: panel.querySelector('[data-actions]') };
   }
-  async function finishedHtml(project) {
+  async function requestJson(path, options = {}, attempts = 2) {
+    let lastError;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 120000);
+        const response = await fetch(new URL(path, location.origin), {
+          cache: 'no-store', credentials: 'same-origin', ...options, signal: controller.signal
+        });
+        clearTimeout(timer);
+        const text = await response.text();
+        let data = {};
+        try { data = text ? JSON.parse(text) : {}; } catch {}
+        if (!response.ok) {
+          const message = data?.error?.message || text.slice(0, 240) || `Server returned HTTP ${response.status}.`;
+          throw Object.assign(new Error(message), { noRetry: response.status < 500 });
+        }
+        return data;
+      } catch (error) {
+        lastError = error;
+        if (error?.noRetry || attempt === attempts) break;
+        try { await fetch(new URL('/api/health', location.origin), { cache: 'no-store', credentials: 'same-origin' }); } catch {}
+        await sleep(2500);
+      }
+    }
+    if (lastError?.name === 'AbortError') throw new Error('The server took too long to respond. Render may still be waking up; try Build APK again in a moment.');
+    if (lastError instanceof TypeError) throw new Error('Could not reach the Codem8s build server. Check the Render deployment and internet connection, then try again.');
+    throw lastError || new Error('The build server could not be reached.');
+  }
+  function textOnlyFiles(project) {
+    const out = {};
+    for (const [name, value] of Object.entries(project?.files || {})) {
+      if (typeof value === 'string') out[name] = value;
+    }
+    return out;
+  }
+  async function finishedHtml(project, ui) {
     if (!framework(project)) return staticHtml(project);
-    const response = await fetch('/api/build-preview', {
-      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ files: project.files })
+    ui.state.textContent = 'Waking the build server and compiling the React app…';
+    const files = textOnlyFiles(project);
+    const data = await requestJson('/api/build-preview', {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ files })
     });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok || !data.html) throw new Error(data?.error?.message || 'The framework app could not be compiled for Android.');
+    if (!data.html) throw new Error('The framework compiler returned no Android page.');
     return data.html;
   }
   async function pollBuild(id, ui) {
     const started = Date.now();
     while (Date.now() - started < 12 * 60 * 1000) {
-      await new Promise(resolve => setTimeout(resolve, 6000));
-      const response = await fetch(`/api/apk-builds/${encodeURIComponent(id)}`, { cache: 'no-store' });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data?.error?.message || 'Could not check the Android build.');
+      await sleep(6000);
+      const data = await requestJson(`/api/apk-builds/${encodeURIComponent(id)}`, {}, 2);
       if (data.ready) {
         ui.state.textContent = 'APK ready. Tap Download APK, then allow installation from this browser when Android asks.';
         const link = document.createElement('a');
@@ -95,15 +132,14 @@
     if (!item?.project) return;
     const ui = showPanel(item);
     try {
-      ui.state.textContent = 'Compiling the saved app into one Android page…';
-      const [html, icon512] = await Promise.all([finishedHtml(item.project), resizePng(item.icon || '/codem8s-app-icon.svg', 512)]);
+      ui.state.textContent = 'Preparing the saved app…';
+      const [html, icon512] = await Promise.all([finishedHtml(item.project, ui), resizePng(item.icon || '/codem8s-app-icon.svg', 512)]);
       ui.state.textContent = 'Sending the Android build request…';
-      const response = await fetch('/api/apk-builds', {
+      const data = await requestJson('/api/apk-builds', {
         method: 'POST', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ appId: item.id, name: item.installName || item.name, icon512, html })
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data?.error?.message || 'The Android build could not be started.');
+      }, 2);
+      if (!data.id) throw new Error('The Android build server did not return a build ID.');
       ui.state.textContent = 'Build started. GitHub is creating the APK…';
       await pollBuild(data.id, ui);
     } catch (error) {
@@ -115,7 +151,7 @@
     const d = appDoc();
     if (!d) return;
     const badge = document.getElementById('codem8s-version');
-    if (badge) badge.textContent = 'Codem8s 10.13.0';
+    if (badge) badge.textContent = 'Codem8s 10.13.1';
     d.querySelectorAll('#appsStoreGrid article').forEach(card => {
       if (card.querySelector('[data-build-apk]')) return;
       const id = card.querySelector('[data-open]')?.dataset.open;
