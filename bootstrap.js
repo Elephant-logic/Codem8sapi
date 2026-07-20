@@ -193,6 +193,7 @@ express.response.send = function codem8sHostSend(body) {
     body = body.replace('</head>', `${ROOT_PWA_CLEANUP}</head>`);
     if (!body.includes('host-app-store-v1.js')) body = body.replace('</body>', '<script src="/host-app-store-v1.js?v=10.13.0"></script></body>');
     if (!body.includes('host-framework-project-safety-v1.js')) body = body.replace('</body>', '<script src="/host-framework-project-safety-v1.js?v=1.1.0"></script></body>');
+    if (!body.includes('host-ai-builder-v1.js')) body = body.replace('</body>', '<script src="/host-ai-builder-v1.js?v=10.14.0"></script></body>');
   }
   return originalSend.call(this, body);
 };
