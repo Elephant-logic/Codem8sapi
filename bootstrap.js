@@ -2,8 +2,13 @@ const express = require('express');
 const originalSend = express.response.send;
 
 express.response.send = function codem8sHostSend(body) {
-  if (typeof body === 'string' && body.includes('id="codem8s-app"') && !body.includes('host-app-store-v1.js')) {
-    body = body.replace('</body>', '<script src="/host-app-store-v1.js?v=10.8.1"></script></body>');
+  if (typeof body === 'string' && body.includes('id="codem8s-app"')) {
+    if (!body.includes('host-app-store-v1.js')) {
+      body = body.replace('</body>', '<script src="/host-app-store-v1.js?v=10.8.1"></script></body>');
+    }
+    if (!body.includes('host-framework-project-safety-v1.js')) {
+      body = body.replace('</body>', '<script src="/host-framework-project-safety-v1.js?v=1.0.0"></script></body>');
+    }
   }
   return originalSend.call(this, body);
 };
