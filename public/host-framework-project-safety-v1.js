@@ -52,7 +52,7 @@
 (() => {
   if (document.querySelector('script[data-codem8s-ai-agent]')) return;
   const script=document.createElement('script');
-  script.src='/host-ai-builder-agent-v1.js?v=1.0.0';
+  script.src='/host-ai-builder-agent-v1.js?v=1.1.0';
   script.dataset.codem8sAiAgent='1';
   document.head.appendChild(script);
 })();
