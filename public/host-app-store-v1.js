@@ -1,7 +1,7 @@
 (() => {
   const frame = document.getElementById('codem8s-app');
   const badge = document.getElementById('codem8s-version');
-  if (badge) badge.textContent = 'Codem8s 10.11.0';
+  if (badge) badge.textContent = 'Codem8s 10.12.1';
   const STORE = 'codem8s_app_store_v1';
   const KEYS = ['codem8s_project_v3','codem8s_project_v4','codem8s_project_v7','codem8s_project_v8'];
   const appWin = () => frame?.contentWindow;
@@ -67,6 +67,25 @@
       reader.readAsDataURL(file);
     });
   }
+  function resizePng(source, size) {
+    return new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = size; canvas.height = size;
+          const ctx = canvas.getContext('2d');
+          ctx.fillStyle = '#07101c'; ctx.fillRect(0, 0, size, size);
+          const scale = Math.min(size / image.naturalWidth, size / image.naturalHeight);
+          const width = image.naturalWidth * scale, height = image.naturalHeight * scale;
+          ctx.drawImage(image, (size - width) / 2, (size - height) / 2, width, height);
+          resolve(canvas.toDataURL('image/png'));
+        } catch (error) { reject(error); }
+      };
+      image.onerror = () => reject(new Error('The app icon could not be prepared.'));
+      image.src = source;
+    });
+  }
   function install(id) {
     const item = apps().find(x => x.id === id); if (!item) return;
     const overlay = document.createElement('div');
@@ -77,24 +96,39 @@
     const nameInput = overlay.querySelector('[data-name]');
     const iconInput = overlay.querySelector('[data-icon]');
     const preview = overlay.querySelector('[data-preview]');
+    const continueButton = overlay.querySelector('[data-continue]');
+    const errorNode = overlay.querySelector('[data-error]');
     let selectedIcon = item.icon || '';
     overlay.querySelector('[data-cancel]').onclick = () => overlay.remove();
     overlay.querySelector('[data-placeholder]').onclick = () => { selectedIcon = ''; preview.src = initialsIcon(nameInput.value || item.name); };
     nameInput.oninput = () => { if (!selectedIcon) preview.src = initialsIcon(nameInput.value || item.name); };
     iconInput.onchange = async () => {
-      try { selectedIcon = await readImage(iconInput.files?.[0]); if (selectedIcon) preview.src = selectedIcon; overlay.querySelector('[data-error]').textContent = ''; }
-      catch (error) { overlay.querySelector('[data-error]').textContent = error.message; iconInput.value = ''; }
+      try { selectedIcon = await readImage(iconInput.files?.[0]); if (selectedIcon) preview.src = selectedIcon; errorNode.textContent = ''; }
+      catch (error) { errorNode.textContent = error.message; iconInput.value = ''; }
     };
-    overlay.querySelector('[data-continue]').onclick = () => {
+    continueButton.onclick = async () => {
       const installName = String(nameInput.value || '').trim();
-      if (!installName) { overlay.querySelector('[data-error]').textContent = 'Enter an app name.'; return; }
-      const list = apps();
-      const updated = list.map(x => x.id === id ? {...x, installName, icon: selectedIcon || initialsIcon(installName), updatedAt: Date.now()} : x);
-      put(updated);
-      overlay.remove();
-      render();
-      window.open(`/mobile-apps/${encodeURIComponent(safeId(id))}/`, '_blank', 'noopener');
-      status(`Opened installer for “${installName}”.`);
+      if (!installName) { errorNode.textContent = 'Enter an app name.'; return; }
+      continueButton.disabled = true;
+      errorNode.textContent = 'Preparing proper app package…';
+      try {
+        const iconSource = selectedIcon || initialsIcon(installName);
+        const [icon192, icon512] = await Promise.all([resizePng(iconSource, 192), resizePng(iconSource, 512)]);
+        const safe = safeId(id);
+        const response = await fetch(`/mobile-apps/${encodeURIComponent(safe)}/config`, {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({name: installName, icon192, icon512})
+        });
+        if (!response.ok) throw new Error('The app package could not be prepared.');
+        const list = apps();
+        put(list.map(x => x.id === id ? {...x, installName, icon: iconSource, updatedAt: Date.now()} : x));
+        overlay.remove(); render();
+        window.open(`/mobile-apps/${encodeURIComponent(safe)}/?v=${Date.now()}`, '_blank', 'noopener');
+        status(`Opened installer for “${installName}”.`);
+      } catch (error) {
+        continueButton.disabled = false;
+        errorNode.textContent = error.message || 'The app package could not be prepared.';
+      }
     };
   }
   function duplicate(id) {
