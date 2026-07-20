@@ -123,3 +123,11 @@
   frame?.addEventListener('load', wire);
   setInterval(() => { wire(); enforceFrameworkSafety(); }, 300);
 })();
+
+(() => {
+  if (document.querySelector('script[data-codem8s-apk-builder]')) return;
+  const script = document.createElement('script');
+  script.src = '/host-apk-builder-v1.js?v=1.0.0';
+  script.dataset.codem8sApkBuilder = '1';
+  document.head.appendChild(script);
+})();
