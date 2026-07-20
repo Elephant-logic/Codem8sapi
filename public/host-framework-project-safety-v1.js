@@ -189,3 +189,42 @@
   frame?.addEventListener('load',watch);
   setInterval(() => { if (!observer) watch(); }, 1000);
 })();
+
+(() => {
+  const frame = document.getElementById('codem8s-app');
+  const PROJECT_KEYS = new Set(['codem8s_project_v4','codem8s_project_v7','codem8s_project_v8','codem8s_project_v3']);
+  function installGuard() {
+    const w = frame?.contentWindow;
+    if (!w || w.__codem8sEmptyEntryGuard) return;
+    w.__codem8sEmptyEntryGuard = true;
+    const storage = w.localStorage;
+    const originalSetItem = storage.setItem.bind(storage);
+    storage.setItem = function guardedSetItem(key, value) {
+      if (PROJECT_KEYS.has(String(key))) {
+        try {
+          const before = JSON.parse(storage.getItem(key) || 'null');
+          const after = JSON.parse(String(value));
+          const beforeName = Object.keys(before?.files || {}).find(name => /(^|\/)index\.html?$/i.test(name));
+          const afterName = Object.keys(after?.files || {}).find(name => /(^|\/)index\.html?$/i.test(name));
+          const beforeHtml = beforeName ? String(before.files[beforeName] || '') : '';
+          const afterHtml = afterName ? String(after.files[afterName] || '') : '';
+          if (beforeHtml.trim() && !afterHtml.trim()) {
+            const d = frame?.contentDocument;
+            const status = d?.querySelector('#status, .status');
+            if (status) {
+              status.textContent = 'Blocked unsafe change: index.html cannot be replaced with an empty file.';
+              status.classList.remove('ok');
+              status.classList.add('err');
+            }
+            throw new Error('Codem8s blocked an update that would empty index.html.');
+          }
+        } catch (error) {
+          if (/blocked an update|cannot be replaced/i.test(String(error?.message || error))) throw error;
+        }
+      }
+      return originalSetItem(key, value);
+    };
+  }
+  frame?.addEventListener('load', installGuard);
+  setInterval(installGuard, 500);
+})();
