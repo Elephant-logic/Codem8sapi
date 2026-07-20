@@ -1,5 +1,5 @@
 (() => {
-  const VERSION = '10.5.3';
+  const VERSION = '10.6.3';
   const frame = document.getElementById('codem8s-app');
   const badge = document.getElementById('codem8s-version');
   if (badge) badge.textContent = `Codem8s ${VERSION}`;
@@ -55,6 +55,27 @@
     preview.srcdoc = `<!doctype html><html><meta name="viewport" content="width=device-width,initial-scale=1"><body style="margin:0;background:#07101c;color:#eaf3ff;font-family:system-ui;padding:24px"><h2 style="color:${error ? '#ff7892' : '#64dcff'}">${escapeHtml(title)}</h2><pre style="white-space:pre-wrap;font:14px/1.5 system-ui">${escapeHtml(body)}</pre></body></html>`;
   }
 
+  function guaranteeReactMount(html) {
+    let output = String(html || '');
+    const mountExpression = '(document.getElementById("root")||document.body.appendChild(Object.assign(document.createElement("div"),{id:"root"})))';
+
+    output = output
+      .replace(/document\.getElementById\(\s*["']root["']\s*\)/g, mountExpression)
+      .replace(/document\.querySelector\(\s*["']#root["']\s*\)/g, mountExpression);
+
+    if (!/id=["']root["']/i.test(output)) {
+      const rootNode = '<div id="root"></div>';
+      const bodyOpen = output.match(/<body\b[^>]*>/i);
+      if (bodyOpen && typeof bodyOpen.index === 'number') {
+        const at = bodyOpen.index + bodyOpen[0].length;
+        output = output.slice(0, at) + rootNode + output.slice(at);
+      } else {
+        output = rootNode + output;
+      }
+    }
+    return output;
+  }
+
   let compiling = false;
   async function compileFrameworkPreview() {
     if (compiling) return;
@@ -79,17 +100,24 @@
       }
       const preview = previewFrame();
       if (preview) {
-        preview.srcdoc = data.html;
+        preview.srcdoc = guaranteeReactMount(data.html);
         preview.addEventListener('load', () => {
-          try {
-            const root = preview.contentDocument && preview.contentDocument.getElementById('root');
-            if (root && (root.firstElementChild || root.textContent.trim())) {
-              setStatus(`Framework preview running from ${data.entry}.`, 'ok');
-            }
-          } catch {}
+          setTimeout(() => {
+            try {
+              const previewDoc = preview.contentDocument;
+              const root = previewDoc && previewDoc.getElementById('root');
+              const runtimeError = previewDoc && previewDoc.getElementById('codem8s-runtime-error');
+              if (runtimeError) return;
+              if (root && (root.firstElementChild || root.textContent.trim())) {
+                setStatus(`Framework preview running from ${data.entry} with Demo Backend.`, 'ok');
+              } else {
+                setStatus('Framework compiled but did not render. See Preview.', 'err');
+              }
+            } catch {}
+          }, 1200);
         }, { once: true });
       }
-      setStatus(`Framework preview compiled from ${data.entry}; waiting for app startup…`);
+      setStatus(`Framework preview compiled from ${data.entry}; starting app…`);
     } catch (error) {
       showMessage('Framework compile error', `${error.message || error}\n\nSource preserved. Automatic repair was not started.`, true);
       setStatus('Framework compilation failed. See Preview.', 'err');
