@@ -35,18 +35,22 @@ const FALLBACK_192 = makePng(192);
 const FALLBACK_512 = makePng(512);
 function iconResponse(id, size, res) {
   const config = installConfig.get(id);
-  const match = /^data:(image\/[a-z0-9.+-]+);base64,(.+)$/i.exec(config?.icon || '');
+  const source = size === 192 ? config?.icon192 : config?.icon512;
+  const match = /^data:image\/png;base64,(.+)$/i.exec(source || '');
   res.setHeader('Cache-Control', 'no-store, max-age=0');
-  if (match) res.type(match[1]).send(Buffer.from(match[2], 'base64'));
-  else res.type('image/png').send(size === 192 ? FALLBACK_192 : FALLBACK_512);
+  res.type('image/png').send(match ? Buffer.from(match[1], 'base64') : (size === 192 ? FALLBACK_192 : FALLBACK_512));
 }
 
 express.application.get = function codem8sInstallRoutes(route, ...handlers) {
   if (route === '*' && !this.__codem8sInstallRoutes) {
     this.__codem8sInstallRoutes = true;
-    this.post('/mobile-apps/:id/config', express.json({ limit: '3mb' }), (req, res) => {
+    this.post('/mobile-apps/:id/config', express.json({ limit: '5mb' }), (req, res) => {
       const id = safeId(req.params.id);
-      installConfig.set(id, { name: safeName(req.body?.name), icon: String(req.body?.icon || '') });
+      installConfig.set(id, {
+        name: safeName(req.body?.name),
+        icon192: String(req.body?.icon192 || ''),
+        icon512: String(req.body?.icon512 || '')
+      });
       res.setHeader('Cache-Control', 'no-store');
       res.json({ ok: true });
     });
@@ -94,8 +98,7 @@ express.response.send = function codem8sHostSend(body) {
     body = body.replace(/<link\b[^>]*rel=["'][^"']*manifest[^"']*["'][^>]*>/gi, '');
     body = body.replace(/<meta\b[^>]*name=["'](?:mobile-web-app-capable|apple-mobile-web-app-capable)["'][^>]*>/gi, '');
     body = body.replace('</head>', `${ROOT_PWA_CLEANUP}</head>`);
-    if (!body.includes('host-app-store-v1.js')) body = body.replace('</body>', '<script src="/host-app-store-v1.js?v=10.12.0"></script></body>');
-    if (!body.includes('host-pwa-config-v1.js')) body = body.replace('</body>', '<script src="/host-pwa-config-v1.js?v=1.0.0"></script></body>');
+    if (!body.includes('host-app-store-v1.js')) body = body.replace('</body>', '<script src="/host-app-store-v1.js?v=10.12.1"></script></body>');
     if (!body.includes('host-framework-project-safety-v1.js')) body = body.replace('</body>', '<script src="/host-framework-project-safety-v1.js?v=1.0.0"></script></body>');
   }
   return originalSend.call(this, body);
