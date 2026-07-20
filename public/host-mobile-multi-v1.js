@@ -1,14 +1,13 @@
 (() => {
   const frame=document.getElementById('codem8s-app'),STORE='codem8s_app_store_v1';
   const win=()=>frame?.contentWindow,doc=()=>{try{return frame?.contentDocument}catch{return null}};
-  const badge=document.getElementById('codem8s-version');if(badge)badge.textContent='Codem8s 10.9.1';
+  const badge=document.getElementById('codem8s-version');if(badge)badge.textContent='Codem8s 10.9.2';
   async function cleanOldRootInstaller(){
     try{
       if('serviceWorker'in navigator){
         const root=new URL('/',location.origin).href;
         for(const registration of await navigator.serviceWorker.getRegistrations()){
-          const script=registration.active?.scriptURL||registration.waiting?.scriptURL||registration.installing?.scriptURL||'';
-          if(registration.scope===root&&/\/mobile-app-sw\.js(?:$|\?)/.test(script))await registration.unregister();
+          if(registration.scope===root)await registration.unregister();
         }
       }
       if('caches'in window){
@@ -41,7 +40,8 @@
       put(apps().map(item=>item.id===id?{...item,installName:name,icon:icon||item.icon,updatedAt:Date.now()}:item));
       win().localStorage.setItem('codem8s_mobile_selected_app',id);
       overlay.remove();
-      window.open('/mobile-apps/'+encodeURIComponent(safe(id))+'/?setup=1','_blank','noopener');
+      const url='/mobile-apps/'+encodeURIComponent(safe(id))+'/?setup=1&source='+encodeURIComponent(id);
+      window.open(url,'_blank','noopener');
     },true);
   }
   frame?.addEventListener('load',wire);setInterval(wire,800);
