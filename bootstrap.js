@@ -1,5 +1,40 @@
 const express = require('express');
+const path = require('path');
 const originalSend = express.response.send;
+const originalGet = express.application.get;
+
+express.application.get = function codem8sRoutes(route, ...handlers) {
+  if (route === '*' && !this.__codem8sMultiRoutes) {
+    this.__codem8sMultiRoutes = true;
+    originalGet.call(this, '/mobile-apps/:id/', (_req, res) => {
+      res.setHeader('Cache-Control', 'no-store, max-age=0');
+      res.sendFile(path.join(__dirname, 'public', 'mobile-app-multi.html'));
+    });
+    originalGet.call(this, '/mobile-apps/:id/sw.js', (req, res) => {
+      res.setHeader('Cache-Control', 'no-store, max-age=0');
+      res.setHeader('Service-Worker-Allowed', `/mobile-apps/${encodeURIComponent(req.params.id)}/`);
+      res.type('application/javascript').sendFile(path.join(__dirname, 'public', 'mobile-app-multi-sw.js'));
+    });
+    originalGet.call(this, '/mobile-apps/:id/manifest.webmanifest', (req, res) => {
+      const id = String(req.params.id || 'app').replace(/[^a-z0-9_-]/gi, '-');
+      const name = String(req.query.name || 'App').slice(0, 80);
+      const base = `/mobile-apps/${encodeURIComponent(id)}/`;
+      res.setHeader('Cache-Control', 'no-store, max-age=0');
+      res.type('application/manifest+json').send(JSON.stringify({
+        name,
+        short_name: name.slice(0, 24),
+        id: base,
+        start_url: base,
+        scope: base,
+        display: 'standalone',
+        background_color: '#07101c',
+        theme_color: '#07101c',
+        icons: [{ src: `${base}icon`, sizes: '512x512', type: 'image/png', purpose: 'any maskable' }]
+      }));
+    });
+  }
+  return originalGet.call(this, route, ...handlers);
+};
 
 express.response.send = function codem8sHostSend(body) {
   if (typeof body === 'string' && body.includes('id="codem8s-app"')) {
@@ -8,6 +43,9 @@ express.response.send = function codem8sHostSend(body) {
     }
     if (!body.includes('host-framework-project-safety-v1.js')) {
       body = body.replace('</body>', '<script src="/host-framework-project-safety-v1.js?v=1.0.0"></script></body>');
+    }
+    if (!body.includes('host-mobile-multi-v1.js')) {
+      body = body.replace('</body>', '<script src="/host-mobile-multi-v1.js?v=10.9.0"></script></body>');
     }
   }
   return originalSend.call(this, body);
