@@ -1,7 +1,7 @@
 (() => {
   const frame=document.getElementById('codem8s-app'),STORE='codem8s_app_store_v1';
   const win=()=>frame?.contentWindow,doc=()=>{try{return frame?.contentDocument}catch{return null}};
-  const badge=document.getElementById('codem8s-version');if(badge)badge.textContent='Codem8s 10.9.0';
+  const badge=document.getElementById('codem8s-version');if(badge)badge.textContent='Codem8s 10.9.1';
   async function cleanOldRootInstaller(){
     try{
       if('serviceWorker'in navigator){
