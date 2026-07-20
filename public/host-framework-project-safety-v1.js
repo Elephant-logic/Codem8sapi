@@ -131,3 +131,61 @@
   script.dataset.codem8sApkBuilder = '1';
   document.head.appendChild(script);
 })();
+
+(() => {
+  const frame = document.getElementById('codem8s-app');
+  let locked = false;
+  let observer = null;
+  function appDoc(){ try { return frame?.contentDocument || null; } catch { return null; } }
+  function stopRepairLoop(reason){
+    if (locked) return;
+    locked = true;
+    const d = appDoc();
+    const w = frame?.contentWindow;
+    if (!d || !w) return;
+    try { w.localStorage.setItem('codem8s_auto_fix','false'); } catch {}
+    const autoFix = d.querySelector('#autoFix');
+    if (autoFix) {
+      autoFix.checked = false;
+      autoFix.disabled = true;
+      try { autoFix.dispatchEvent(new Event('change',{bubbles:true})); } catch {}
+    }
+    d.querySelectorAll('button').forEach(button => {
+      const text = (button.textContent || '').trim().toLowerCase();
+      if (button.id === 'fixNow' || /repair|auto fix|retry fix/.test(text)) {
+        button.disabled = true;
+        button.dataset.repairLocked = '1';
+      }
+    });
+    d.addEventListener('click', event => {
+      const button = event.target.closest('button');
+      if (!button) return;
+      const text = (button.textContent || '').trim().toLowerCase();
+      if (button.dataset.repairLocked === '1' || button.id === 'fixNow' || /repair|auto fix|retry fix/.test(text)) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+    }, true);
+    const status = d.querySelector('#status, .status');
+    if (status) {
+      status.textContent = reason || 'Repair stopped after a regression. The last working snapshot was kept.';
+      status.classList.remove('ok');
+      status.classList.add('err');
+    }
+  }
+  function watch(){
+    locked = false;
+    observer?.disconnect();
+    const d = appDoc();
+    if (!d?.documentElement) return;
+    observer = new MutationObserver(() => {
+      const text = d.body?.innerText || '';
+      if (/Rejected repair\b|regression detected|Previously passing check failed/i.test(text)) {
+        stopRepairLoop('Repair stopped: the attempted fix introduced a regression, so no further automatic repair will run.');
+      }
+    });
+    observer.observe(d.documentElement,{subtree:true,childList:true,characterData:true});
+  }
+  frame?.addEventListener('load',watch);
+  setInterval(() => { if (!observer) watch(); }, 1000);
+})();
