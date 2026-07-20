@@ -62,7 +62,7 @@ express.response.send = function codem8sHostSend(body) {
       body = body.replace('</body>', '<script src="/host-framework-project-safety-v1.js?v=1.0.0"></script></body>');
     }
     if (!body.includes('host-mobile-multi-v1.js')) {
-      body = body.replace('</body>', '<script src="/host-mobile-multi-v1.js?v=10.9.1"></script></body>');
+      body = body.replace('</body>', '<script src="/host-mobile-multi-v1.js?v=10.9.2"></script></body>');
     }
     body = body.replace('</body>', `<script>(async()=>{try{if('serviceWorker'in navigator){const root=new URL('/',location.origin).href;for(const r of await navigator.serviceWorker.getRegistrations()){if(r.scope===root)await r.unregister()}}if('caches'in window){for(const k of await caches.keys()){if(k==='codem8s-mobile-shell-v1'||k==='codem8s-mobile-shell-v2'||k==='codem8s-mobile-identities-v1')await caches.delete(k)}}}catch{}})();</script></body>`);
   }
