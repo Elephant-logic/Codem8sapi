@@ -3,6 +3,16 @@ const path = require('path');
 const originalSend = express.response.send;
 const originalGet = express.application.get;
 
+function safeId(value) {
+  return String(value || 'app').replace(/[^a-z0-9_-]/gi, '-');
+}
+function safeName(value) {
+  return String(value || 'App').replace(/[<>"'&]/g, '').trim().slice(0, 80) || 'App';
+}
+function initials(value) {
+  return safeName(value).split(/\s+/).slice(0, 2).map(part => part[0] || '').join('').toUpperCase() || 'A';
+}
+
 express.application.get = function codem8sRoutes(route, ...handlers) {
   if (route === '*' && !this.__codem8sMultiRoutes) {
     this.__codem8sMultiRoutes = true;
@@ -12,12 +22,19 @@ express.application.get = function codem8sRoutes(route, ...handlers) {
     });
     originalGet.call(this, '/mobile-apps/:id/sw.js', (req, res) => {
       res.setHeader('Cache-Control', 'no-store, max-age=0');
-      res.setHeader('Service-Worker-Allowed', `/mobile-apps/${encodeURIComponent(req.params.id)}/`);
+      res.setHeader('Service-Worker-Allowed', `/mobile-apps/${encodeURIComponent(safeId(req.params.id))}/`);
       res.type('application/javascript').sendFile(path.join(__dirname, 'public', 'mobile-app-multi-sw.js'));
     });
+    originalGet.call(this, '/mobile-apps/:id/icon.svg', (req, res) => {
+      const name = safeName(req.query.name);
+      const letters = initials(name);
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#22d3ee"/><stop offset="1" stop-color="#7c3aed"/></linearGradient></defs><rect width="512" height="512" rx="112" fill="#07101c"/><rect x="20" y="20" width="472" height="472" rx="100" fill="url(#g)"/><text x="256" y="320" text-anchor="middle" font-family="Arial,sans-serif" font-size="190" font-weight="800" fill="#07101c">${letters}</text></svg>`;
+      res.setHeader('Cache-Control', 'no-store, max-age=0');
+      res.type('image/svg+xml').send(svg);
+    });
     originalGet.call(this, '/mobile-apps/:id/manifest.webmanifest', (req, res) => {
-      const id = String(req.params.id || 'app').replace(/[^a-z0-9_-]/gi, '-');
-      const name = String(req.query.name || 'App').slice(0, 80);
+      const id = safeId(req.params.id);
+      const name = safeName(req.query.name);
       const base = `/mobile-apps/${encodeURIComponent(id)}/`;
       res.setHeader('Cache-Control', 'no-store, max-age=0');
       res.type('application/manifest+json').send(JSON.stringify({
@@ -29,7 +46,7 @@ express.application.get = function codem8sRoutes(route, ...handlers) {
         display: 'standalone',
         background_color: '#07101c',
         theme_color: '#07101c',
-        icons: [{ src: `${base}icon`, sizes: '512x512', type: 'image/png', purpose: 'any maskable' }]
+        icons: [{ src: `${base}icon.svg?name=${encodeURIComponent(name)}`, sizes: 'any', type: 'image/svg+xml', purpose: 'any maskable' }]
       }));
     });
   }
@@ -45,8 +62,9 @@ express.response.send = function codem8sHostSend(body) {
       body = body.replace('</body>', '<script src="/host-framework-project-safety-v1.js?v=1.0.0"></script></body>');
     }
     if (!body.includes('host-mobile-multi-v1.js')) {
-      body = body.replace('</body>', '<script src="/host-mobile-multi-v1.js?v=10.9.0"></script></body>');
+      body = body.replace('</body>', '<script src="/host-mobile-multi-v1.js?v=10.9.1"></script></body>');
     }
+    body = body.replace('</body>', `<script>(async()=>{try{if('serviceWorker'in navigator){const root=new URL('/',location.origin).href;for(const r of await navigator.serviceWorker.getRegistrations()){if(r.scope===root)await r.unregister()}}if('caches'in window){for(const k of await caches.keys()){if(k==='codem8s-mobile-shell-v1'||k==='codem8s-mobile-shell-v2'||k==='codem8s-mobile-identities-v1')await caches.delete(k)}}}catch{}})();</script></body>`);
   }
   return originalSend.call(this, body);
 };
