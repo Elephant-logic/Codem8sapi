@@ -138,6 +138,11 @@
     }
   }
 
+  function openPreviewPane(doc) {
+    doc.querySelectorAll('.workspace').forEach((node) => node.classList.toggle('active', node.id === 'previewPane'));
+    doc.querySelectorAll('.tab').forEach((node) => node.classList.toggle('active', node.dataset.pane === 'previewPane'));
+  }
+
   function wireApp() {
     const doc = appDocument();
     if (!doc || doc.documentElement.dataset.codem8sHostWired) return;
@@ -146,9 +151,13 @@
       const target = event.target.closest('#runPreview, #openPreview, [data-pane="previewPane"], .tab');
       if (!target) return;
       const text = (target.textContent || '').trim().toLowerCase();
-      if (target.matches('#runPreview, #openPreview, [data-pane="previewPane"]') || text === 'preview') {
-        setTimeout(compileFrameworkPreview, 120);
-      }
+      const wantsPreview = target.matches('#runPreview, #openPreview, [data-pane="previewPane"]') || text === 'preview' || text === 'run';
+      const project = readProject();
+      if (!wantsPreview || !isFrameworkProject(project)) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      openPreviewPane(doc);
+      compileFrameworkPreview();
     }, true);
 
     const observer = new MutationObserver(() => {
@@ -158,6 +167,7 @@
       if (status && /Build tested successfully/i.test(status.textContent || '')) {
         status.textContent = 'Source checks passed. Compiling framework preview…';
         status.classList.remove('ok');
+        openPreviewPane(doc);
         compileFrameworkPreview();
       }
     });
