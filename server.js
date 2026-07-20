@@ -6,7 +6,7 @@ const app = express();
 const PORT = Number(process.env.PORT || 10000);
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const PUBLIC_DIR = path.join(__dirname, 'public');
-const VERSION = '10.5.0';
+const VERSION = '10.5.1';
 
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
@@ -137,6 +137,10 @@ app.post('/api/build-preview', rateLimit, async (req, res) => {
       name: 'codem8s-virtual-project',
       setup(build) {
         build.onResolve({ filter: /.*/ }, (args) => {
+          if (args.kind === 'entry-point') {
+            const foundEntry = findLocalFile(files, args.path) || frontend.entry;
+            return { path: foundEntry, namespace: 'codem8s' };
+          }
           if (!args.path.startsWith('.') && !args.path.startsWith('/')) {
             return { path: args.path, external: true };
           }
