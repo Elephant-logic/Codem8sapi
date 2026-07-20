@@ -6,7 +6,7 @@ const app = express();
 const PORT = Number(process.env.PORT || 10000);
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const PUBLIC_DIR = path.join(__dirname, 'public');
-const VERSION = '10.6.0';
+const VERSION = '10.6.1';
 
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
@@ -90,7 +90,7 @@ function loaderFor(name) {
 
 function findFrontend(files) {
   const names = Object.keys(files);
-  const htmlName = names.find((name) => /(^|\/)public\/index\.html$/i.test(name)
+  const htmlName = names.find((name) => /(^|\/)public\/index\.html$/i.test(name))
     || names.find((name) => /(^|\/)index\.html$/i.test(name));
   if (!htmlName) throw new Error('No frontend index.html was found.');
   const root = htmlName.replace(/(?:public\/)?index\.html$/i, '');
@@ -157,16 +157,16 @@ function save(s){localStorage.setItem(KEY,JSON.stringify(s))}
 function json(data,status){return Promise.resolve(new Response(JSON.stringify(data),{status:status||200,headers:{'Content-Type':'application/json','X-Codem8s-Demo':'1'}}))}
 function bodyOf(init){try{return init&&init.body?JSON.parse(init.body):{}}catch(e){return {}}}
 var realFetch=window.fetch.bind(window);
-window.fetch=function(input,init){var raw=typeof input==='string'?input:input&&input.url||'';var url=new URL(raw,location.href);var path=url.pathname;var method=String((init&&init.method)||(input&&input.method)||'GET').toUpperCase();if(path.indexOf('/api/')!==0)return realFetch(input,init);var s=load();var body=bodyOf(init);
-if(path==='/api/auth/register'&&method==='POST'){var email=String(body.email||'').trim().toLowerCase();var password=String(body.password||'');if(!email||!password)return json({error:'Invalid input'},400);if(s.users.some(function(u){return u.email===email}))return json({error:'Email already in use'},409);var id='demo-user-'+Date.now();var user={id:id,email:email,password:password};var ws={id:'demo-workspace-'+Date.now(),name:'My Workspace',owner_user_id:id};s.users.push(user);s.workspaces.push(ws);s.session=id;save(s);return json({user:{id:id,email:email},workspace:{id:ws.id,name:ws.name}})}
-if(path==='/api/auth/login'&&method==='POST'){var email2=String(body.email||'').trim().toLowerCase();var user2=s.users.find(function(u){return u.email===email2&&u.password===String(body.password||'')});if(!user2)return json({error:'Invalid credentials'},401);s.session=user2.id;save(s);return json({user:{id:user2.id,email:user2.email}})}
-if(path==='/api/auth/logout'&&method==='POST'){s.session=null;save(s);return json({ok:true})}
-if(path==='/api/auth/me'&&method==='GET'){var me=s.users.find(function(u){return u.id===s.session});return me?json({user:{id:me.id,email:me.email}}):json({error:'Not authenticated'},401)}
-if(path==='/api/workspaces'&&method==='GET'){if(!s.session)return json({error:'Not authenticated'},401);return json({workspaces:s.workspaces.filter(function(w){return w.owner_user_id===s.session||w.id==='demo-workspace'})})}
-if(path==='/api/workspaces'&&method==='POST'){if(!s.session)return json({error:'Not authenticated'},401);var ws2={id:'demo-workspace-'+Date.now(),name:String(body.name||'Untitled Workspace'),owner_user_id:s.session};s.workspaces.push(ws2);save(s);return json({workspace:{id:ws2.id,name:ws2.name}})}
-if(path==='/api/sync/action'&&method==='POST'){s.actions.push(body);save(s);return json({ok:true,applied:true,demo:true})}
-if(/\/api\/workspaces\/[^/]+\/export$/.test(path)&&method==='GET'){var wid=path.split('/')[3];var found=s.workspaces.find(function(w){return w.id===wid})||s.workspaces[0];return json({workspace:found,columns:[{id:'todo',title:'To do',position:0}],cards:s.actions.filter(function(a){return a.workspaceId===wid&&a.type==='create_card'}).map(function(a){return {id:a.id,column_id:'todo',title:a.payload&&a.payload.title||'New Card',content:a.payload&&a.payload.content||'',position:0}}),notes:[],comments:[]})}
-return json({error:'Demo endpoint not implemented',path:path},404)};
+window.fetch=function(input,init){var raw=typeof input==='string'?input:input&&input.url||'';var url=new URL(raw,location.href);var pathname=url.pathname;var method=String((init&&init.method)||(input&&input.method)||'GET').toUpperCase();if(pathname.indexOf('/api/')!==0)return realFetch(input,init);var s=load();var body=bodyOf(init);
+if(pathname==='/api/auth/register'&&method==='POST'){var email=String(body.email||'').trim().toLowerCase();var password=String(body.password||'');if(!email||!password)return json({error:'Invalid input'},400);if(s.users.some(function(u){return u.email===email}))return json({error:'Email already in use'},409);var id='demo-user-'+Date.now();var user={id:id,email:email,password:password};var ws={id:'demo-workspace-'+Date.now(),name:'My Workspace',owner_user_id:id};s.users.push(user);s.workspaces.push(ws);s.session=id;save(s);return json({user:{id:id,email:email},workspace:{id:ws.id,name:ws.name}})}
+if(pathname==='/api/auth/login'&&method==='POST'){var email2=String(body.email||'').trim().toLowerCase();var user2=s.users.find(function(u){return u.email===email2&&u.password===String(body.password||'')});if(!user2)return json({error:'Invalid credentials'},401);s.session=user2.id;save(s);return json({user:{id:user2.id,email:user2.email}})}
+if(pathname==='/api/auth/logout'&&method==='POST'){s.session=null;save(s);return json({ok:true})}
+if(pathname==='/api/auth/me'&&method==='GET'){var me=s.users.find(function(u){return u.id===s.session});return me?json({user:{id:me.id,email:me.email}}):json({error:'Not authenticated'},401)}
+if(pathname==='/api/workspaces'&&method==='GET'){if(!s.session)return json({error:'Not authenticated'},401);return json({workspaces:s.workspaces.filter(function(w){return w.owner_user_id===s.session||w.id==='demo-workspace'})})}
+if(pathname==='/api/workspaces'&&method==='POST'){if(!s.session)return json({error:'Not authenticated'},401);var ws2={id:'demo-workspace-'+Date.now(),name:String(body.name||'Untitled Workspace'),owner_user_id:s.session};s.workspaces.push(ws2);save(s);return json({workspace:{id:ws2.id,name:ws2.name}})}
+if(pathname==='/api/sync/action'&&method==='POST'){s.actions.push(body);save(s);return json({ok:true,applied:true,demo:true})}
+if(/\/api\/workspaces\/[^/]+\/export$/.test(pathname)&&method==='GET'){var wid=pathname.split('/')[3];var found=s.workspaces.find(function(w){return w.id===wid})||s.workspaces[0];return json({workspace:found,columns:[{id:'todo',title:'To do',position:0}],cards:s.actions.filter(function(a){return a.workspaceId===wid&&a.type==='create_card'}).map(function(a){return {id:a.id,column_id:'todo',title:a.payload&&a.payload.title||'New Card',content:a.payload&&a.payload.content||'',position:0}}),notes:[],comments:[]})}
+return json({error:'Demo endpoint not implemented',path:pathname},404)};
 var NativeWS=window.WebSocket;function DemoWS(url){this.url=String(url);this.readyState=0;this.OPEN=1;this.CLOSED=3;var self=this;setTimeout(function(){self.readyState=1;if(self.onopen)self.onopen({type:'open'});if(self.onmessage)self.onmessage({data:JSON.stringify({type:'presence',demo:true,users:1})})},50)}DemoWS.prototype.send=function(){};DemoWS.prototype.close=function(){this.readyState=3;if(this.onclose)this.onclose({type:'close'})};DemoWS.OPEN=1;DemoWS.CLOSED=3;window.WebSocket=function(url,protocols){return String(url).indexOf('/ws')>=0?new DemoWS(url):new NativeWS(url,protocols)};window.WebSocket.OPEN=1;window.WebSocket.CLOSED=3;
 function banner(){if(document.getElementById('codem8s-demo-banner'))return;var b=document.createElement('div');b.id='codem8s-demo-banner';b.textContent='Demo Backend • data stays in this preview';b.style.cssText='position:fixed;top:0;left:0;right:0;z-index:2147483646;background:#5b3df5;color:white;padding:7px 10px;text-align:center;font:12px system-ui';document.body.style.paddingTop='32px';document.body.appendChild(b)}if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',banner);else banner();
 })();<\/script>`;
