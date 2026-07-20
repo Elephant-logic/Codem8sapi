@@ -191,10 +191,10 @@ express.response.send = function codem8sHostSend(body) {
     body = body.replace(/<link\b[^>]*rel=["'][^"']*manifest[^"']*["'][^>]*>/gi, '');
     body = body.replace(/<meta\b[^>]*name=["'](?:mobile-web-app-capable|apple-mobile-web-app-capable)["'][^>]*>/gi, '');
     body = body.replace('</head>', `${ROOT_PWA_CLEANUP}</head>`);
-    if (!body.includes('host-app-store-v1.js')) body = body.replace('</body>', '<script src="/host-app-store-v1.js?v=10.13.0"></script></body>');
-    if (!body.includes('host-framework-project-safety-v1.js')) body = body.replace('</body>', '<script src="/host-framework-project-safety-v1.js?v=1.1.0"></script></body>');
+    if (!body.includes('host-app-store-v1.js')) body = body.replace('</body>', '<script src="/host-app-store-v1.js?v=10.14.3"></script></body>');
+    if (!body.includes('host-framework-project-safety-v1.js')) body = body.replace('</body>', '<script src="/host-framework-project-safety-v1.js?v=1.2.0"></script></body>');
     if (!body.includes('host-ai-builder-v1.js')) body = body.replace('</body>', '<script src="/host-ai-builder-v1.js?v=10.14.0"></script></body>');
-    if (!body.includes('host-file-editor-v1.js')) body = body.replace('</body>', '<script src="/host-file-editor-v1.js?v=10.14.1"></script></body>');
+    if (!body.includes('host-file-editor-v1.js')) body = body.replace('</body>', '<script src="/host-file-editor-v1.js?v=10.14.3"></script></body>');
   }
   return originalSend.call(this, body);
 };
