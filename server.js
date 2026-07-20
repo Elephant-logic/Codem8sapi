@@ -9,7 +9,7 @@ const PORT = Number(process.env.PORT || 10000);
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const PUBLIC_DIR = path.join(__dirname, "public");
 const INDEX_PATH = path.join(PUBLIC_DIR, "index.html");
-const PATCH_VERSION = "10.3.1";
+const PATCH_VERSION = "10.3.2";
 
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
@@ -120,11 +120,17 @@ app.post("/api/build-preview", rateLimit, async (req, res) => {
         build.onLoad({ filter: /.*/, namespace: "codem8s" }, args => ({ contents: files[args.path], loader: loaderFor(args.path), resolveDir: posix.dirname(args.path) }));
       }
     };
-    const result = await esbuild.build({ entryPoints: [entry], bundle: true, write: false, format: "esm", platform: "browser", target: "es2020", jsx: "automatic", sourcemap: "inline", plugins: [virtualPlugin], logLevel: "silent" });
+    const result = await esbuild.build({
+      entryPoints: [entry], bundle: true, write: false, format: "esm", platform: "browser",
+      target: "es2020", jsx: "automatic", sourcemap: "inline", plugins: [virtualPlugin], logLevel: "silent"
+    });
     const js = result.outputFiles.find(file => file.path.endsWith(".js"))?.text || "";
     const css = result.outputFiles.find(file => file.path.endsWith(".css"))?.text || "";
     const imports = {};
-    for (const dep of dependencies) { imports[dep] = `https://esm.sh/${dep}`; imports[`${dep}/`] = `https://esm.sh/${dep}/`; }
+    for (const dep of dependencies) {
+      imports[dep] = `https://esm.sh/${dep}`;
+      imports[`${dep}/`] = `https://esm.sh/${dep}/`;
+    }
     const importMap = `<script type="importmap">${JSON.stringify({ imports })}</script>`;
     const style = css ? `<style>${css.replace(/<\/style/gi, "<\\/style")}</style>` : "";
     const compiledScript = `<script type="module">${js.replace(/<\/script/gi, "<\\/script")}</script>`;
@@ -137,47 +143,56 @@ app.post("/api/build-preview", rateLimit, async (req, res) => {
   }
 });
 
-app.use(express.static(PUBLIC_DIR, { extensions: ["html"], maxAge: "1h", setHeaders(res, filePath) { if (filePath.endsWith("index.html") || filePath.endsWith("build-requirements-v10_2.js")) res.setHeader("Cache-Control", "no-store"); } }));
-
-function replaceRequired(source, pattern, replacement, label) {
-  const next = source.replace(pattern, replacement);
-  if (next === source) throw new Error(`Frontend patch failed: ${label}`);
-  return next;
-}
+app.use(express.static(PUBLIC_DIR, {
+  extensions: ["html"],
+  maxAge: "1h",
+  setHeaders(res, filePath) {
+    if (filePath.endsWith("index.html") || filePath.endsWith("build-requirements-v10_2.js")) res.setHeader("Cache-Control", "no-store");
+  }
+}));
 
 function patchBuilderSource(source) {
-  const helper = String.raw`
-function projectNeedsToolchain(){const names=Object.keys(project.files||{});if(names.some(n=>/\.(tsx?|jsx|vue|svelte)$/i.test(n)))return true;const pkg=project.files['package.json']||project.files['frontend/package.json']||'';return /\"(?:react|vite|next|vue|svelte|typescript|webpack|parcel)\"\s*:/i.test(pkg)}
-function protectedRepairFile(name){return /(^|\/)(?:\.env(?:\.example)?|\.gitignore|render\.yaml|package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/i.test(name)}
-function shortRuntimeError(message){const text=String(message||'');if(text.includes('data:text/javascript'))return text.replace(/data:text\/javascript[^ @]*/i,'generated preview script');return text.length>500?text.slice(0,500)+'…':text}
-`;
-  source = replaceRequired(source, /function bundleProject\(\)\{/, helper + "\nfunction bundleProject(){", "helpers");
-  source = replaceRequired(source, /function renderPreview\(clear=true\)\{[\s\S]*?\}\nwindow\.addEventListener\('message'/, String.raw`async function renderPreview(clear=true){saveEditor();runtimeErrors=[];if(clear)logs=[];if(projectNeedsToolchain()){els.preview.srcdoc='<!doctype html><html><meta name="viewport" content="width=device-width,initial-scale=1"><body style="margin:0;background:#07101c;color:#eaf3ff;font-family:system-ui;padding:24px"><h2 style="color:#64dcff">Compiling framework preview…</h2><p>Codem8s ${PATCH_VERSION}</p></body></html>';if(clear)log('info','Framework project detected. Compiling TS/TSX/JSX with esbuild…');try{const response=await fetch('/api/build-preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({files:project.files})});const data=await response.json();if(!response.ok)throw new Error([data?.error?.message,...(data?.error?.details||[])].filter(Boolean).join('\n'));els.preview.srcdoc=data.html;log('ok','Framework preview compiled: '+data.entry);status('Framework preview compiled.','ok')}catch(error){const message=shortRuntimeError(error.message||String(error));els.preview.srcdoc='<!doctype html><html><meta name="viewport" content="width=device-width,initial-scale=1"><body style="margin:0;background:#07101c;color:#eaf3ff;font-family:system-ui;padding:24px"><h2 style="color:#ff7892">Framework compile error</h2><pre style="white-space:pre-wrap">'+escapeHtml(message)+'</pre><p>Source preserved. Automatic repair was not started.</p></body></html>';log('error','Framework compiler: '+message);status('Framework preview needs attention.','err')}persist();renderHome();return}const bundled=bundleProject();els.preview.srcdoc=bundled;persist();renderHome();if(clear){const entry=chooseEntry();log('info',entry?`Running ${entry} with ${Object.keys(project.files).length} text files and ${Object.keys(importedBinaries).length} preserved binaries.`:`No browser entry found; showing source.`)}}
-window.addEventListener('message'`, "renderPreview");
-  source = replaceRequired(source, /function collectCheckState\(\)\{[\s\S]*?\}\nfunction passingCheckIds/, String.raw`function collectCheckState(){saveEditor();const state={};const names=Object.keys(project.files);state['project:has-files']=names.length>0;const htmlName=project.files['index.html']?'index.html':names.find(n=>/\.html?$/i.test(n));state['project:html-entry']=!!htmlName;if(htmlName){const html=project.files[htmlName]||'';const refs=[...html.matchAll(/(?:src|href)=["']([^"']+)["']/gi)].map(m=>m[1]).filter(x=>! /^(https?:|data:|blob:|#|\/\/)/i.test(x));for(const ref of refs){const p=normalizePath(htmlName,ref);state['ref:'+p]=project.files[p]!=null||assets.some(a=>assetPath(a)===p)}}for(const [name,content] of Object.entries(project.files)){if(!protectedRepairFile(name))state['file:'+name+':nonempty']=!!content.trim();if(/\.(js|mjs|cjs)$/i.test(name)){try{new Function(content);state['js:'+name+':syntax']=true}catch{state['js:'+name+':syntax']=false}}if(/\.json$/i.test(name)){try{JSON.parse(content);state['json:'+name+':syntax']=true}catch{state['json:'+name+':syntax']=false}}}state['runtime:no-errors']=projectNeedsToolchain()?true:runtimeErrors.length===0;return state}
-function passingCheckIds`, "collectCheckState");
-  source = replaceRequired(source, /function findRegressions\(beforePassing,afterState\)\{[^\n]*\}/, "function findRegressions(beforePassing,afterState){return beforePassing.filter(id=>!protectedRepairFile(id.replace(/^file:/,'').replace(/:nonempty$/,''))&&!(projectNeedsToolchain()&&id==='runtime:no-errors')&&afterState[id]!==true)}", "findRegressions");
-  source = replaceRequired(source, /function collectIssues\(\)\{[\s\S]*?\}\nfunction runTests/, String.raw`function collectIssues(){saveEditor();const issues=[];const names=Object.keys(project.files);if(!names.length)return['No files found.'];const htmlName=project.files['index.html']?'index.html':names.find(n=>/\.html?$/i.test(n));if(htmlName){const html=project.files[htmlName]||'';const refs=[...html.matchAll(/(?:src|href)=["']([^"']+)["']/gi)].map(m=>m[1]).filter(x=>! /^(https?:|data:|blob:|#|\/\/)/i.test(x));for(const ref of refs){const p=normalizePath(htmlName,ref);if(project.files[p]==null&&!assets.some(a=>assetPath(a)===p))issues.push('Missing referenced file: '+p)}}for(const [name,content] of Object.entries(project.files)){if(/\.(js|mjs|cjs)$/i.test(name)){try{new Function(content)}catch(e){issues.push(name+': JavaScript syntax error: '+e.message)}}if(/\.json$/i.test(name)){try{JSON.parse(content)}catch(e){issues.push(name+': JSON error: '+e.message)}}if(!content.trim()&&!protectedRepairFile(name))issues.push(name+' is empty.')}if(!projectNeedsToolchain())for(const err of runtimeErrors)issues.push('Runtime error: '+shortRuntimeError(err));return[...new Set(issues)]}
-function runTests`, "collectIssues");
-  source = source.replace("<body>", `<body><div style="position:fixed;right:6px;bottom:6px;z-index:99999;background:#17304d;color:#bfefff;border:1px solid #4d779f;border-radius:999px;padding:4px 8px;font:10px system-ui">Codem8s ${PATCH_VERSION}</div>`);
-  source = source.replace(/<title>[^<]*<\/title>/i, `<title>Codem8s ${PATCH_VERSION}</title>`);
+  const helper = [
+    "function projectNeedsToolchain(){const names=Object.keys(project.files||{});if(names.some(function(n){return /\\.(tsx?|jsx|vue|svelte)$/i.test(n)}))return true;const pkg=project.files['package.json']||project.files['frontend/package.json']||'';return /\\\"(?:react|vite|next|vue|svelte|typescript|webpack|parcel)\\\"\\s*:/i.test(pkg)}",
+    "function protectedRepairFile(name){return /(^|\\/)(?:\\.env(?:\\.example)?|\\.gitignore|render\\.yaml|package-lock\\.json|yarn\\.lock|pnpm-lock\\.yaml)$/i.test(name)}",
+    "function shortRuntimeError(message){const text=String(message||'');if(text.includes('data:text/javascript'))return text.replace(/data:text\\/javascript[^ @]*/i,'generated preview script');return text.length>500?text.slice(0,500)+'…':text}"
+  ].join("\n");
+
+  if (!source.includes("function projectNeedsToolchain()")) source = source.replace("function bundleProject(){", helper + "\nfunction bundleProject(){");
+
+  const oldRender = "function renderPreview(clear=true){saveEditor();runtimeErrors=[];if(clear)logs=[];const bundled=bundleProject();els.preview.srcdoc=bundled;persist();renderHome();if(clear){const entry=chooseEntry();log('info',entry?`Running ${entry} with ${Object.keys(project.files).length} text files and ${Object.keys(importedBinaries).length} preserved binaries.`:`No browser entry found; showing source.`)}}";
+  const newRender = [
+    "async function renderPreview(clear=true){",
+    "saveEditor();runtimeErrors=[];if(clear)logs=[];",
+    "if(projectNeedsToolchain()){",
+    "els.preview.srcdoc='<!doctype html><html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><body style=\"margin:0;background:#07101c;color:#eaf3ff;font-family:system-ui;padding:24px\"><h2 style=\"color:#64dcff\">Compiling framework preview…</h2><p>Codem8s 10.3.2</p></body></html>';",
+    "if(clear)log('info','Framework project detected. Compiling TS/TSX/JSX with esbuild…');",
+    "try{const response=await fetch('/api/build-preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({files:project.files})});const data=await response.json();if(!response.ok)throw new Error([data&&data.error&&data.error.message].concat((data&&data.error&&data.error.details)||[]).filter(Boolean).join('\\n'));els.preview.srcdoc=data.html;log('ok','Framework preview compiled: '+data.entry);(data.warnings||[]).forEach(function(w){log('warn',w)});status('Framework preview compiled.','ok')}catch(error){const message=shortRuntimeError(error.message||String(error));els.preview.srcdoc='<!doctype html><html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><body style=\"margin:0;background:#07101c;color:#eaf3ff;font-family:system-ui;padding:24px\"><h2 style=\"color:#ff7892\">Framework compile error</h2><pre style=\"white-space:pre-wrap\">'+escapeHtml(message)+'</pre><p>Source preserved. Automatic repair was not started.</p></body></html>';log('error','Framework compiler: '+message);status('Framework preview needs attention.','err')}persist();renderHome();return}",
+    "const bundled=bundleProject();els.preview.srcdoc=bundled;persist();renderHome();if(clear){const entry=chooseEntry();log('info',entry?'Running '+entry+' with '+Object.keys(project.files).length+' text files and '+Object.keys(importedBinaries).length+' preserved binaries.':'No browser entry found; showing source.')}}"
+  ].join("");
+  if (source.includes(oldRender)) source = source.replace(oldRender, newRender);
+
+  source = source.replace("window.addEventListener('message',e=>{if(e.data?.source!=='codem8s-preview')return;const type=e.data.type==='ready'?'ok':'error';if(type==='error')runtimeErrors.push(String(e.data.message));log(type,e.data.message)});", "window.addEventListener('message',e=>{if(e.data?.source!=='codem8s-preview')return;const type=e.data.type==='ready'?'ok':'error';const message=shortRuntimeError(e.data.message);if(type==='error'&&!projectNeedsToolchain())runtimeErrors.push(message);log(type,message)});");
+  source = source.replace("state['file:'+name+':nonempty']=!!content.trim();", "if(!protectedRepairFile(name))state['file:'+name+':nonempty']=!!content.trim();");
+  source = source.replace("state['runtime:no-errors']=runtimeErrors.length===0;return state", "state['runtime:no-errors']=projectNeedsToolchain()?true:runtimeErrors.length===0;return state");
+  source = source.replace("if(!content.trim())issues.push(`${name} is empty.`)", "if(!content.trim()&&!protectedRepairFile(name))issues.push(`${name} is empty.`)");
+  source = source.replace("for(const err of runtimeErrors)issues.push(`Runtime error: ${err}`);", "if(!projectNeedsToolchain())for(const err of runtimeErrors)issues.push(`Runtime error: ${shortRuntimeError(err)}`);");
+  source = source.replace("if(!content.trim())log('warn',`${name} is empty.`)", "if(!content.trim()&&!protectedRepairFile(name))log('warn',`${name} is empty.`)");
+  source = source.replace("for(const err of runtimeErrors)log('error',`Runtime: ${err}`);", "if(!projectNeedsToolchain())for(const err of runtimeErrors)log('error',`Runtime: ${shortRuntimeError(err)}`);else log('info','Framework source checks passed; preview uses esbuild.');");
+  source = source.replace("function findRegressions(beforePassing,afterState){return beforePassing.filter(id=>afterState[id]!==true)}", "function findRegressions(beforePassing,afterState){return beforePassing.filter(id=>!/^file:(?:.*\\/)?(?:\\.env(?:\\.example)?|\\.gitignore|render\\.yaml|package-lock\\.json|yarn\\.lock|pnpm-lock\\.yaml):nonempty$/i.test(id)&&!(projectNeedsToolchain()&&id==='runtime:no-errors')&&afterState[id]!==true)}");
   return source;
 }
 
 function sendPatchedIndex(res) {
   fs.readFile(INDEX_PATH, "utf8", (error, source) => {
     if (error) return res.status(500).send("Codem8s frontend is unavailable.");
-    try {
-      const requirementsTag = '<script src="/build-requirements-v10_2.js"></script>';
-      let html = patchBuilderSource(source);
-      if (!html.includes(requirementsTag)) html = html.replace(/<\/body>/i, `${requirementsTag}</body>`);
-      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
-      res.setHeader("X-Codem8s-Version", PATCH_VERSION);
-      res.type("html").send(html);
-    } catch (patchError) {
-      console.error(patchError);
-      res.status(500).type("html").send(`<h1>Codem8s patch failed</h1><pre>${String(patchError.message)}</pre>`);
-    }
+    const requirementsTag = '<script src="/build-requirements-v10_2.js"></script>';
+    const badge = '<div style="position:fixed;right:8px;bottom:8px;z-index:99999;background:#10243c;color:#64dcff;border:1px solid #315476;border-radius:999px;padding:5px 9px;font:11px system-ui">Codem8s 10.3.2</div>';
+    let html = patchBuilderSource(source);
+    if (!html.includes(requirementsTag)) html = html.replace(/<\/body>/i, requirementsTag + badge + "</body>");
+    else if (!html.includes("Codem8s 10.3.2")) html = html.replace(/<\/body>/i, badge + "</body>");
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+    res.type("html").send(html);
   });
 }
 
