@@ -1,13 +1,14 @@
 (() => {
   const frame = document.getElementById('codem8s-app');
   const badge = document.getElementById('codem8s-version');
-  if (badge) badge.textContent = 'Codem8s 10.8.4';
+  if (badge) badge.textContent = 'Codem8s 10.11.0';
   const STORE = 'codem8s_app_store_v1';
   const KEYS = ['codem8s_project_v3','codem8s_project_v4','codem8s_project_v7','codem8s_project_v8'];
   const appWin = () => frame?.contentWindow;
   const appDoc = () => { try { return frame?.contentDocument; } catch { return null; } };
   const copy = value => JSON.parse(JSON.stringify(value));
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const safeId = value => String(value || 'app').replace(/[^a-z0-9_-]/gi, '-');
 
   function project() {
     for (const key of KEYS) {
@@ -92,8 +93,7 @@
       put(updated);
       overlay.remove();
       render();
-      appWin().localStorage.setItem('codem8s_mobile_selected_app', id);
-      window.open(`/mobile-app.html?id=${encodeURIComponent(id)}`, '_blank', 'noopener');
+      window.open(`/mobile-apps/${encodeURIComponent(safeId(id))}/`, '_blank', 'noopener');
       status(`Opened installer for “${installName}”.`);
     };
   }
