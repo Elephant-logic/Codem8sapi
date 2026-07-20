@@ -76,25 +76,85 @@
 
 (() => {
   const frame=document.getElementById('codem8s-app');
-  function installGuard(){
-    const w=frame?.contentWindow;if(!w||w.__codem8sEmptyEntryGuard)return;w.__codem8sEmptyEntryGuard=true;
-    const storage=w.localStorage,originalSetItem=storage.setItem.bind(storage);
-    storage.setItem=function guardedSetItem(key,value){
-      if(/^codem8s_project_/i.test(String(key))){
-        try{
-          const before=JSON.parse(storage.getItem(key)||'null'),after=JSON.parse(String(value));
-          const beforeName=Object.keys(before?.files||{}).find(name=>/(^|\/)index\.html?$/i.test(name));
-          const afterName=Object.keys(after?.files||{}).find(name=>/(^|\/)index\.html?$/i.test(name));
-          const beforeHtml=beforeName?String(before.files[beforeName]||''):'',afterHtml=afterName?String(after.files[afterName]||''):'';
-          if(beforeHtml.trim()&&!afterHtml.trim()){
-            const d=frame?.contentDocument,status=d?.querySelector('#status, .status');
-            if(status){status.textContent='Blocked unsafe change: index.html cannot be replaced with an empty file.';status.classList.remove('ok');status.classList.add('err');}
-            throw new Error('Codem8s blocked an update that would empty index.html.');
-          }
-        }catch(error){if(/blocked an update|cannot be replaced/i.test(String(error?.message||error)))throw error;}
-      }
-      return originalSetItem(key,value);
-    };
+  const BACKUP_PREFIX='codem8s_index_backup_v2:';
+  let nativeSetItem=null;
+
+  function entry(project){
+    const files=project?.files||{};
+    const name=Object.keys(files).find(path=>/(^|\/)index\.html?$/i.test(path));
+    return {name,html:name?String(files[name]||''):''};
   }
-  frame?.addEventListener('load',installGuard);setInterval(installGuard,500);
+  function backupKey(projectKey){return `${BACKUP_PREFIX}${projectKey}`;}
+  function status(message){
+    try{
+      const d=frame?.contentDocument,node=d?.querySelector('#status, .status');
+      if(node){node.textContent=message;node.classList.remove('ok');node.classList.add('err');}
+    }catch{}
+  }
+  function saveBackup(storage,projectKey,project){
+    const current=entry(project);
+    if(!current.name||!current.html.trim())return;
+    try{nativeSetItem.call(storage,backupKey(projectKey),JSON.stringify({path:current.name,html:current.html,at:Date.now()}));}catch{}
+  }
+  function readBackup(storage,projectKey){
+    try{return JSON.parse(storage.getItem(backupKey(projectKey))||'null');}catch{return null;}
+  }
+  function protectValue(storage,key,value){
+    let after;
+    try{after=JSON.parse(String(value));}catch{return value;}
+    if(!after?.files||typeof after.files!=='object')return value;
+
+    let before=null;
+    try{before=JSON.parse(storage.getItem(key)||'null');}catch{}
+    const previous=entry(before),next=entry(after);
+    const saved=readBackup(storage,key);
+    const fallback=previous.html.trim()?{path:previous.name,html:previous.html}:saved?.html?.trim()?saved:null;
+
+    if(fallback&&(!next.name||!next.html.trim())){
+      after.files={...after.files,[next.name||fallback.path||'index.html']:fallback.html};
+      after.updatedAt=Date.now();
+      status('Recovered index.html: an unsafe empty project save was blocked.');
+      saveBackup(storage,key,after);
+      return JSON.stringify(after);
+    }
+
+    if(next.html.trim())saveBackup(storage,key,after);
+    return value;
+  }
+  function scanAndRecover(){
+    const w=frame?.contentWindow;if(!w)return;
+    const storage=w.localStorage;
+    for(let i=0;i<storage.length;i++){
+      const key=storage.key(i);if(!/^codem8s_project_/i.test(key||''))continue;
+      let project=null;try{project=JSON.parse(storage.getItem(key)||'null');}catch{}
+      if(!project?.files)continue;
+      const current=entry(project);
+      if(current.html.trim()){saveBackup(storage,key,project);continue;}
+      const saved=readBackup(storage,key);
+      if(saved?.html?.trim()){
+        project.files={...project.files,[current.name||saved.path||'index.html']:saved.html};
+        project.updatedAt=Date.now();
+        nativeSetItem.call(storage,key,JSON.stringify(project));
+        status('Recovered index.html from the protected project backup.');
+      }
+    }
+  }
+  function installGuard(){
+    const w=frame?.contentWindow;if(!w)return;
+    const storage=w.localStorage;
+    if(!nativeSetItem)nativeSetItem=w.Storage.prototype.setItem;
+    if(!w.__codem8sIndexProtectionV2){
+      w.__codem8sIndexProtectionV2=true;
+      const original=nativeSetItem;
+      w.Storage.prototype.setItem=function(key,value){
+        const text=String(key||'');
+        return original.call(this,key,/^codem8s_project_/i.test(text)?protectValue(this,text,value):value);
+      };
+      w.addEventListener('pagehide',scanAndRecover);
+      w.addEventListener('beforeunload',scanAndRecover);
+    }
+    scanAndRecover();
+  }
+  frame?.addEventListener('load',()=>setTimeout(installGuard,0));
+  setInterval(installGuard,250);
 })();
