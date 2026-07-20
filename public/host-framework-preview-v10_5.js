@@ -1,5 +1,5 @@
 (() => {
-  const VERSION = '10.5.2';
+  const VERSION = '10.5.3';
   const frame = document.getElementById('codem8s-app');
   const badge = document.getElementById('codem8s-version');
   if (badge) badge.textContent = `Codem8s ${VERSION}`;
@@ -31,33 +31,6 @@
     return /"(?:react|react-scripts|vite|typescript|next|webpack)"\s*:/i.test(text || '');
   }
 
-  function dependencyImportMap(project) {
-    const files = project?.files || {};
-    const names = Object.keys(files);
-    const packageName = names.find((name) => /(^|\/)frontend\/package\.json$/i.test(name))
-      || names.find((name) => /(^|\/)package\.json$/i.test(name));
-    if (!packageName) return { imports: {} };
-    try {
-      const pkg = JSON.parse(files[packageName]);
-      const dependencies = {
-        ...(pkg.dependencies || {}),
-        ...(pkg.peerDependencies || {})
-      };
-      const imports = {};
-      for (const [name, version] of Object.entries(dependencies)) {
-        const cleanVersion = String(version || '').replace(/^[~^]/, '');
-        const suffix = cleanVersion && !cleanVersion.startsWith('file:') && !cleanVersion.startsWith('workspace:')
-          ? `@${cleanVersion}`
-          : '';
-        imports[name] = `https://esm.sh/${name}${suffix}`;
-        imports[`${name}/`] = `https://esm.sh/${name}${suffix}/`;
-      }
-      return { imports };
-    } catch {
-      return { imports: {} };
-    }
-  }
-
   function previewFrame() {
     const doc = appDocument();
     return doc && doc.querySelector('#preview, iframe.preview, #previewPane iframe');
@@ -80,20 +53,6 @@
     const preview = previewFrame();
     if (!preview) return;
     preview.srcdoc = `<!doctype html><html><meta name="viewport" content="width=device-width,initial-scale=1"><body style="margin:0;background:#07101c;color:#eaf3ff;font-family:system-ui;padding:24px"><h2 style="color:${error ? '#ff7892' : '#64dcff'}">${escapeHtml(title)}</h2><pre style="white-space:pre-wrap;font:14px/1.5 system-ui">${escapeHtml(body)}</pre></body></html>`;
-  }
-
-  function enhancePreviewHtml(html, project) {
-    const importMap = `<script type="importmap">${JSON.stringify(dependencyImportMap(project))}<\/script>`;
-    const runtimeGuard = `<script>(function(){function show(message){var old=document.getElementById('codem8s-runtime-error');if(old)old.remove();var box=document.createElement('div');box.id='codem8s-runtime-error';box.style.cssText='position:fixed;inset:0;z-index:2147483647;overflow:auto;background:#07101c;color:#eaf3ff;padding:24px;font:14px/1.5 system-ui';var h=document.createElement('h2');h.textContent='Preview runtime error';h.style.color='#ff7892';var pre=document.createElement('pre');pre.style.whiteSpace='pre-wrap';pre.textContent=String(message||'Unknown runtime error');box.appendChild(h);box.appendChild(pre);document.body.innerHTML='';document.body.appendChild(box)}window.addEventListener('error',function(e){show(e.message||e.error||'Script failed to load')});window.addEventListener('unhandledrejection',function(e){show(e.reason&&e.reason.message||e.reason||'Unhandled promise rejection')});setTimeout(function(){var root=document.getElementById('root');if(root&&!root.firstElementChild&&!root.textContent.trim())show('The framework compiled, but nothing rendered into #root. Check the browser entry file and component imports.')},8000)})();<\/script>`;
-    let output = String(html || '');
-    if (/<script\b[^>]*type=["']module["']/i.test(output)) {
-      output = output.replace(/<script\b[^>]*type=["']module["']/i, `${importMap}${runtimeGuard}<script type="module"`);
-    } else if (/<\/head>/i.test(output)) {
-      output = output.replace(/<\/head>/i, `${importMap}${runtimeGuard}</head>`);
-    } else {
-      output = importMap + runtimeGuard + output;
-    }
-    return output;
   }
 
   let compiling = false;
@@ -119,8 +78,18 @@
         throw new Error(details || 'Framework preview failed.');
       }
       const preview = previewFrame();
-      if (preview) preview.srcdoc = enhancePreviewHtml(data.html, project);
-      setStatus(`Framework preview compiled from ${data.entry}.`, 'ok');
+      if (preview) {
+        preview.srcdoc = data.html;
+        preview.addEventListener('load', () => {
+          try {
+            const root = preview.contentDocument && preview.contentDocument.getElementById('root');
+            if (root && (root.firstElementChild || root.textContent.trim())) {
+              setStatus(`Framework preview running from ${data.entry}.`, 'ok');
+            }
+          } catch {}
+        }, { once: true });
+      }
+      setStatus(`Framework preview compiled from ${data.entry}; waiting for app startup…`);
     } catch (error) {
       showMessage('Framework compile error', `${error.message || error}\n\nSource preserved. Automatic repair was not started.`, true);
       setStatus('Framework compilation failed. See Preview.', 'err');
