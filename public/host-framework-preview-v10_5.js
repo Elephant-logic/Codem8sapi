@@ -1,5 +1,5 @@
 (() => {
-  const VERSION = '10.6.3';
+  const VERSION = '10.6.4';
   const frame = document.getElementById('codem8s-app');
   const badge = document.getElementById('codem8s-version');
   if (badge) badge.textContent = `Codem8s ${VERSION}`;
@@ -55,13 +55,18 @@
     preview.srcdoc = `<!doctype html><html><meta name="viewport" content="width=device-width,initial-scale=1"><body style="margin:0;background:#07101c;color:#eaf3ff;font-family:system-ui;padding:24px"><h2 style="color:${error ? '#ff7892' : '#64dcff'}">${escapeHtml(title)}</h2><pre style="white-space:pre-wrap;font:14px/1.5 system-ui">${escapeHtml(body)}</pre></body></html>`;
   }
 
-  function guaranteeReactMount(html) {
+  function demoCredentialScript() {
+    return `<script>(function(){var attempts=0;function setValue(input,value){if(!input)return;var setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;setter.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}))}function fill(){attempts++;var email=document.querySelector('input[type="email"],input[name*="email" i],input[autocomplete="email"]');var password=document.querySelector('input[type="password"],input[name*="password" i],input[autocomplete="current-password"]');if(email&&!email.value)setValue(email,'alice@example.com');if(password&&!password.value)setValue(password,'password');if((!email||!password)&&attempts<40)setTimeout(fill,150)}if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',fill);else fill()})();<\/script>`;
+  }
+
+  function preparePreviewHtml(html) {
     let output = String(html || '');
     const mountExpression = '(document.getElementById("root")||document.body.appendChild(Object.assign(document.createElement("div"),{id:"root"})))';
 
     output = output
       .replace(/document\.getElementById\(\s*["']root["']\s*\)/g, mountExpression)
-      .replace(/document\.querySelector\(\s*["']#root["']\s*\)/g, mountExpression);
+      .replace(/document\.querySelector\(\s*["']#root["']\s*\)/g, mountExpression)
+      .replace(/new URL\(raw\s*,\s*location\.href\)/g, "new URL(raw,'https://codem8s.preview')");
 
     if (!/id=["']root["']/i.test(output)) {
       const rootNode = '<div id="root"></div>';
@@ -73,6 +78,13 @@
         output = rootNode + output;
       }
     }
+
+    const credentials = demoCredentialScript();
+    const bodyClose = output.toLowerCase().lastIndexOf('</body>');
+    output = bodyClose >= 0
+      ? output.slice(0, bodyClose) + credentials + output.slice(bodyClose)
+      : output + credentials;
+
     return output;
   }
 
@@ -100,7 +112,7 @@
       }
       const preview = previewFrame();
       if (preview) {
-        preview.srcdoc = guaranteeReactMount(data.html);
+        preview.srcdoc = preparePreviewHtml(data.html);
         preview.addEventListener('load', () => {
           setTimeout(() => {
             try {
