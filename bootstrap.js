@@ -1,3 +1,13 @@
+const express = require('express');
+const originalSend = express.response.send;
+
+express.response.send = function codem8sHostSend(body) {
+  if (typeof body === 'string' && body.includes('id="codem8s-app"') && !body.includes('host-app-store-v1.js')) {
+    body = body.replace('</body>', '<script src="/host-app-store-v1.js?v=10.8.0"></script></body>');
+  }
+  return originalSend.call(this, body);
+};
+
 const nativeFetch = global.fetch;
 
 const UI_QUALITY_RULES = `
@@ -15,10 +25,7 @@ MANDATORY UI QUALITY PASS:
 
 global.fetch = async function codem8sQualityFetch(input, init = {}) {
   const url = typeof input === 'string' ? input : input?.url || '';
-  if (!url.startsWith('https://api.openai.com/v1/responses')) {
-    return nativeFetch(input, init);
-  }
-
+  if (!url.startsWith('https://api.openai.com/v1/responses')) return nativeFetch(input, init);
   try {
     const body = JSON.parse(init.body || '{}');
     const existing = typeof body.instructions === 'string' ? body.instructions : '';
