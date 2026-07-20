@@ -10,7 +10,7 @@ express.response.send = function codem8sHostSend(body) {
       body = body.replace('</body>', '<script src="/host-framework-project-safety-v1.js?v=1.0.0"></script></body>');
     }
     if (!body.includes('host-mobile-install-v2.js')) {
-      body = body.replace('</body>', '<script src="/host-mobile-install-v2.js?v=10.8.6"></script></body>');
+      body = body.replace('</body>', '<script src="/host-mobile-install-v2.js?v=10.8.9"></script></body>');
     }
   }
   return originalSend.call(this, body);
