@@ -1,0 +1,138 @@
+name: Build Codem8s APK
+run-name: Build APK ${{ github.event.head_commit.message }}
+
+on:
+  push:
+    paths:
+      - 'apk-build-requests/*.json'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+      - name: Read request
+        id: request
+        shell: bash
+        run: |
+          FILE=$(find apk-build-requests -maxdepth 1 -type f -name '*.json' -printf '%T@ %p\n' | sort -nr | head -1 | cut -d' ' -f2-)
+          ID=$(jq -r '.id' "$FILE")
+          NAME=$(jq -r '.name' "$FILE")
+          PACKAGE=$(jq -r '.packageId' "$FILE")
+          echo "id=$ID" >> "$GITHUB_OUTPUT"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "package=$PACKAGE" >> "$GITHUB_OUTPUT"
+          mkdir -p android-app/app/src/main/java/com/codem8s/generated android-app/app/src/main/assets android-app/app/src/main/res/drawable
+          jq -r '.htmlBase64' "$FILE" | base64 -d > android-app/app/src/main/assets/index.html
+          jq -r '.iconBase64' "$FILE" | base64 -d > android-app/app/src/main/res/drawable/app_icon.png
+      - name: Create Android project
+        shell: bash
+        run: |
+          cat > android-app/settings.gradle <<'EOF'
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
+          rootProject.name = 'Codem8sGeneratedApp'
+          include ':app'
+          EOF
+          cat > android-app/build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application' version '8.5.2' apply false
+          }
+          EOF
+          cat > android-app/app/build.gradle <<EOF
+          plugins { id 'com.android.application' }
+          android {
+              namespace '${{ steps.request.outputs.package }}'
+              compileSdk 35
+              defaultConfig {
+                  applicationId '${{ steps.request.outputs.package }}'
+                  minSdk 23
+                  targetSdk 35
+                  versionCode 1
+                  versionName '1.0'
+              }
+          }
+          EOF
+          cat > android-app/app/src/main/AndroidManifest.xml <<EOF
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+            <uses-permission android:name="android.permission.INTERNET" />
+            <application android:theme="@style/AppTheme" android:label="${{ steps.request.outputs.name }}" android:icon="@drawable/app_icon" android:allowBackup="false" android:usesCleartextTraffic="true">
+              <activity android:name=".MainActivity" android:screenOrientation="unspecified" android:exported="true">
+                <intent-filter>
+                  <action android:name="android.intent.action.MAIN" />
+                  <category android:name="android.intent.category.LAUNCHER" />
+                </intent-filter>
+              </activity>
+            </application>
+          </manifest>
+          EOF
+          mkdir -p android-app/app/src/main/res/values
+          cat > android-app/app/src/main/res/values/styles.xml <<'EOF'
+          <resources>
+            <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+              <item name="android:fontFamily">sans</item>
+              <item name="android:colorAccent">#22d3ee</item>
+              <item name="android:navigationBarColor">#07101c</item>
+              <item name="android:statusBarColor">#07101c</item>
+              <item name="android:windowLightStatusBar">false</item>
+            </style>
+          </resources>
+          EOF
+          PACKAGE_PATH=$(echo '${{ steps.request.outputs.package }}' | tr '.' '/')
+          mkdir -p "android-app/app/src/main/java/$PACKAGE_PATH"
+          cat > "android-app/app/src/main/java/$PACKAGE_PATH/MainActivity.java" <<EOF
+          package ${{ steps.request.outputs.package }};
+          import android.app.Activity;
+          import android.os.Bundle;
+          import android.webkit.WebChromeClient;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+          public class MainActivity extends Activity {
+            private WebView webView;
+            @Override public void onCreate(Bundle state) {
+              super.onCreate(state);
+              webView = new WebView(this);
+              WebSettings settings = webView.getSettings();
+              settings.setJavaScriptEnabled(true);
+              settings.setDomStorageEnabled(true);
+              settings.setAllowFileAccess(true);
+              settings.setAllowContentAccess(true);
+              settings.setMediaPlaybackRequiresUserGesture(false);
+              webView.setWebViewClient(new WebViewClient());
+              webView.setWebChromeClient(new WebChromeClient());
+              setContentView(webView);
+              webView.loadUrl("file:///android_asset/index.html");
+            }
+            @Override public void onBackPressed() {
+              if (webView != null && webView.canGoBack()) webView.goBack(); else super.onBackPressed();
+            }
+          }
+          EOF
+      - name: Build debug APK
+        working-directory: android-app
+        run: gradle --no-daemon assembleDebug
+      - name: Publish APK release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          ID='${{ steps.request.outputs.id }}'
+          NAME='${{ steps.request.outputs.name }}'
+          APK="android-app/app/build/outputs/apk/debug/app-debug.apk"
+          OUT="${ID}.apk"
+          cp "$APK" "$OUT"
+          gh release delete "apk-$ID" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "apk-$ID" "$OUT" --title "$NAME Android APK" --notes "Debug APK generated by Codem8s."
