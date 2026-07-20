@@ -1,14 +1,38 @@
 const express = require('express');
+const path = require('path');
 const originalSend = express.response.send;
+const originalGet = express.application.get;
+
+function safeId(value) {
+  return String(value || 'app').replace(/[^a-z0-9_-]/gi, '-');
+}
+
+express.application.get = function codem8sInstallRoutes(route, ...handlers) {
+  if (route === '*' && !this.__codem8sInstallRoutes) {
+    this.__codem8sInstallRoutes = true;
+    originalGet.call(this, '/mobile-apps/:id/', (_req, res) => {
+      res.setHeader('Cache-Control', 'no-store, max-age=0');
+      res.sendFile(path.join(__dirname, 'public', 'mobile-app-multi.html'));
+    });
+    originalGet.call(this, '/mobile-apps/:id/sw.js', (req, res) => {
+      const base = `/mobile-apps/${encodeURIComponent(safeId(req.params.id))}/`;
+      res.setHeader('Cache-Control', 'no-store, max-age=0');
+      res.setHeader('Service-Worker-Allowed', base);
+      res.type('application/javascript').sendFile(path.join(__dirname, 'public', 'mobile-app-multi-sw.js'));
+    });
+  }
+  return originalGet.call(this, route, ...handlers);
+};
 
 express.response.send = function codem8sHostSend(body) {
   if (typeof body === 'string' && body.includes('id="codem8s-app"')) {
     if (!body.includes('host-app-store-v1.js')) {
-      body = body.replace('</body>', '<script src="/host-app-store-v1.js?v=10.8.4"></script></body>');
+      body = body.replace('</body>', '<script src="/host-app-store-v1.js?v=10.11.0"></script></body>');
     }
     if (!body.includes('host-framework-project-safety-v1.js')) {
       body = body.replace('</body>', '<script src="/host-framework-project-safety-v1.js?v=1.0.0"></script></body>');
     }
+    body = body.replace('</body>', `<script>(async()=>{try{if('serviceWorker'in navigator){const root=new URL('/',location.origin).href;for(const r of await navigator.serviceWorker.getRegistrations()){if(r.scope===root)await r.unregister()}}if('caches'in window){for(const k of await caches.keys()){if(k==='codem8s-mobile-shell-v1'||k==='codem8s-mobile-shell-v2'||k==='codem8s-mobile-identities-v1')await caches.delete(k)}}}catch{}})();</script></body>`);
   }
   return originalSend.call(this, body);
 };
