@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#07101c">
+<link rel="manifest" href="/mobile-app.webmanifest">
+<link rel="icon" href="/codem8s-app-icon.svg">
+<title>Codem8s Mobile App</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:#07101c;color:#edf5ff;font-family:system-ui,-apple-system,sans-serif}body{display:grid;grid-template-rows:auto 1fr}.bar{position:sticky;top:0;z-index:5;display:flex;gap:10px;align-items:center;padding:10px max(12px,env(safe-area-inset-right)) 10px max(12px,env(safe-area-inset-left));background:#0b1728;border-bottom:1px solid #29425f}.title{min-width:0;flex:1}.title strong{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.title small{color:#8fa4c1}.btn{min-height:44px;padding:10px 14px;border:1px solid #365477;border-radius:12px;background:#142843;color:#edf5ff;font-weight:800}.btn.primary{border:0;background:linear-gradient(135deg,#64dcff,#927cff);color:#06101b}.stage{min-height:0;position:relative}.stage iframe{width:100%;height:100%;min-height:calc(100vh - 66px);border:0;background:white}.message{padding:24px;max-width:680px;margin:auto}.message h1{font-size:clamp(1.7rem,8vw,3rem)}.message p{color:#a8bad2;line-height:1.55}.hidden{display:none!important}
+</style>
+</head>
+<body>
+<header class="bar"><div class="title"><strong id="appName">Codem8s App</strong><small id="state">Loading saved app…</small></div><button id="install" class="btn primary hidden">Install</button><button id="reload" class="btn">Reload</button></header>
+<main class="stage"><div id="message" class="message"><h1>Loading app…</h1><p>This installer loads the saved snapshot from My Apps on this device.</p></div><iframe id="app" class="hidden" title="Installed app preview"></iframe></main>
+<script>
+const STORE='codem8s_app_store_v1';
+const selectedFromUrl=new URLSearchParams(location.search).get('id');
+if(selectedFromUrl)localStorage.setItem('codem8s_mobile_selected_app',selectedFromUrl);
+const selectedId=selectedFromUrl||localStorage.getItem('codem8s_mobile_selected_app');
+const frame=document.getElementById('app'),message=document.getElementById('message'),state=document.getElementById('state'),nameNode=document.getElementById('appName');
+let deferredPrompt=null;
+window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();deferredPrompt=event;document.getElementById('install').classList.remove('hidden');});
+window.addEventListener('appinstalled',()=>{state.textContent='Installed on this phone';document.getElementById('install').classList.add('hidden');});
+document.getElementById('install').onclick=async()=>{if(deferredPrompt){deferredPrompt.prompt();await deferredPrompt.userChoice;deferredPrompt=null;return;}alert('Use your browser menu and choose Add to Home screen or Install app.');};
+document.getElementById('reload').onclick=()=>load();
+if('serviceWorker'in navigator)navigator.serviceWorker.register('/mobile-app-sw.js').catch(()=>{});
+function apps(){try{return JSON.parse(localStorage.getItem(STORE)||'[]')}catch{return[]}}
+function showError(text){frame.classList.add('hidden');message.classList.remove('hidden');message.innerHTML='<h1>App could not load</h1><p>'+String(text).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))+'</p>';state.textContent='Saved app unavailable';}
+function isFramework(project){const names=Object.keys(project?.files||{});if(names.some(n=>/\.(tsx?|jsx)$/i.test(n)))return true;const pkg=names.find(n=>/(^|\/)package\.json$/i.test(n));return pkg&&/"(?:react|vite|typescript|next|webpack)"\s*:/i.test(project.files[pkg]||'');}
+function normalize(base,ref){const parts=(base.split('/').slice(0,-1).concat(ref.split('/'))),out=[];for(const part of parts){if(!part||part==='.')continue;if(part==='..')out.pop();else out.push(part)}return out.join('/');}
+function staticHtml(project){const files=project.files||{};const names=Object.keys(files);const entry=names.find(n=>/(^|\/)index\.html?$/i.test(n))||names.find(n=>/\.html?$/i.test(n));if(!entry)throw new Error('No HTML entry file was found.');let html=String(files[entry]||'');html=html.replace(/<link\b([^>]*?)href=["']([^"']+)["']([^>]*)>/gi,(all,a,ref,b)=>{if(/^(https?:|data:|blob:|#|\/\/)/i.test(ref))return all;const path=normalize(entry,ref);return files[path]!=null&&/\.css$/i.test(path)?'<style>'+files[path]+'</style>':all;});html=html.replace(/<script\b([^>]*?)src=["']([^"']+)["']([^>]*)><\/script>/gi,(all,a,ref,b)=>{if(/^(https?:|data:|blob:|\/\/)/i.test(ref))return all;const path=normalize(entry,ref);return files[path]!=null?'<script'+a+b+'>'+String(files[path]).replace(/<\/script/gi,'<\\/script')+'<\/script>':all;});return html;}
+async function load(){const item=apps().find(x=>x.id===selectedId)||(apps()[0]);if(!item?.project)return showError('Open My Apps in Codem8s and save an app first.');localStorage.setItem('codem8s_mobile_selected_app',item.id);nameNode.textContent=item.name||item.project.name||'Codem8s App';document.title=nameNode.textContent;state.textContent='Preparing mobile app…';message.classList.remove('hidden');frame.classList.add('hidden');try{let html;if(isFramework(item.project)){const response=await fetch('/api/build-preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({files:item.project.files})});const data=await response.json();if(!response.ok)throw new Error(data?.error?.message||'Framework preview failed.');html=data.html;}else html=staticHtml(item.project);frame.srcdoc=html;frame.classList.remove('hidden');message.classList.add('hidden');state.textContent='Ready on this device';}catch(error){showError(error.message||error)}}
+load();
+</script>
+</body>
+</html>
