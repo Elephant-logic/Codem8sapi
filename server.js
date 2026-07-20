@@ -36,7 +36,8 @@ app.get("/api/health", (_req, res) => {
     ok: true,
     openaiConfigured: Boolean(OPENAI_API_KEY),
     service: "codem8s-render",
-    repairPipeline: "10.1"
+    repairPipeline: "10.1",
+    buildRequirements: "10.2"
   });
 });
 
@@ -89,7 +90,11 @@ app.use(express.static(PUBLIC_DIR, {
   extensions: ["html"],
   maxAge: "1h",
   setHeaders(res, filePath) {
-    if (filePath.endsWith("index.html") || filePath.endsWith("repair-pipeline-v10_1.js")) {
+    if (
+      filePath.endsWith("index.html") ||
+      filePath.endsWith("repair-pipeline-v10_1.js") ||
+      filePath.endsWith("build-requirements-v10_2.js")
+    ) {
       res.setHeader("Cache-Control", "no-store");
     }
   }
@@ -102,10 +107,17 @@ function sendPatchedIndex(res) {
       return res.status(500).send("Codem8s frontend is unavailable.");
     }
 
-    const scriptTag = '<script src="/repair-pipeline-v10_1.js"></script>';
-    const html = source.includes(scriptTag)
-      ? source
-      : source.replace(/<\/body>/i, `${scriptTag}</body>`);
+    const scripts = [
+      '<script src="/repair-pipeline-v10_1.js"></script>',
+      '<script src="/build-requirements-v10_2.js"></script>'
+    ];
+
+    let html = source;
+    for (const scriptTag of scripts) {
+      if (!html.includes(scriptTag)) {
+        html = html.replace(/<\/body>/i, `${scriptTag}</body>`);
+      }
+    }
 
     res.setHeader("Cache-Control", "no-store");
     res.type("html").send(html);
