@@ -6,7 +6,7 @@ const app = express();
 const PORT = Number(process.env.PORT || 10000);
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const PUBLIC_DIR = path.join(__dirname, 'public');
-const VERSION = '10.6.1';
+const VERSION = '10.6.2';
 
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
@@ -16,11 +16,11 @@ const buckets = new Map();
 function rateLimit(req, res, next) {
   const key = req.ip || 'unknown';
   const now = Date.now();
-  const current = buckets.get(key) || { start: now, count: 0 };
-  if (now - current.start > 60_000) { current.start = now; current.count = 0; }
-  current.count += 1;
-  buckets.set(key, current);
-  if (current.count > 30) return res.status(429).json({ error: { message: 'Too many requests. Try again shortly.' } });
+  const bucket = buckets.get(key) || { start: now, count: 0 };
+  if (now - bucket.start > 60_000) { bucket.start = now; bucket.count = 0; }
+  bucket.count += 1;
+  buckets.set(key, bucket);
+  if (bucket.count > 30) return res.status(429).json({ error: { message: 'Too many requests. Try again shortly.' } });
   next();
 }
 
@@ -29,7 +29,7 @@ app.get('/api/health', (_req, res) => res.json({
   openaiConfigured: Boolean(OPENAI_API_KEY),
   service: 'codem8s-render',
   version: VERSION,
-  frameworkPreview: 'esbuild-demo-backend'
+  frameworkPreview: 'esbuild-demo-backend-mount-guard'
 }));
 
 app.post('/api/openai', rateLimit, async (req, res) => {
@@ -148,28 +148,12 @@ function runtimeGuard() {
   return `<script>(function(){function show(message){var box=document.getElementById('codem8s-runtime-error');if(!box){box=document.createElement('div');box.id='codem8s-runtime-error';box.style.cssText='position:fixed;inset:0;z-index:2147483647;overflow:auto;background:#07101c;color:#eaf3ff;padding:24px;font:14px/1.5 system-ui';document.body.innerHTML='';document.body.appendChild(box)}box.innerHTML='<h2 style="color:#ff7892">Preview runtime error</h2><pre style="white-space:pre-wrap"></pre>';box.querySelector('pre').textContent=String(message||'Unknown runtime error')}window.addEventListener('error',function(e){show(e.message||e.error||'Script failed to load')});window.addEventListener('unhandledrejection',function(e){show(e.reason&&e.reason.message||e.reason||'Unhandled promise rejection')});setTimeout(function(){var root=document.getElementById('root');if(root&&!root.firstElementChild&&!root.textContent.trim())show('The app compiled but rendered nothing. A dependency or startup request may have failed.')},5000)})();<\/script>`;
 }
 
+function mountGuard() {
+  return `<script>(function(){var root=document.getElementById('root');if(!root){root=document.createElement('div');root.id='root';document.body.appendChild(root)}})();<\/script>`;
+}
+
 function demoBackendScript() {
-  return `<script>(function(){
-var KEY='codem8s:demo-backend:v1';
-function load(){try{return JSON.parse(localStorage.getItem(KEY)||'null')||seed()}catch(e){return seed()}}
-function seed(){var s={users:[{id:'demo-alice',email:'alice@example.com',password:'password'}],session:null,workspaces:[{id:'demo-workspace',name:'Demo Workspace',owner_user_id:'demo-alice'}],actions:[]};save(s);return s}
-function save(s){localStorage.setItem(KEY,JSON.stringify(s))}
-function json(data,status){return Promise.resolve(new Response(JSON.stringify(data),{status:status||200,headers:{'Content-Type':'application/json','X-Codem8s-Demo':'1'}}))}
-function bodyOf(init){try{return init&&init.body?JSON.parse(init.body):{}}catch(e){return {}}}
-var realFetch=window.fetch.bind(window);
-window.fetch=function(input,init){var raw=typeof input==='string'?input:input&&input.url||'';var url=new URL(raw,location.href);var pathname=url.pathname;var method=String((init&&init.method)||(input&&input.method)||'GET').toUpperCase();if(pathname.indexOf('/api/')!==0)return realFetch(input,init);var s=load();var body=bodyOf(init);
-if(pathname==='/api/auth/register'&&method==='POST'){var email=String(body.email||'').trim().toLowerCase();var password=String(body.password||'');if(!email||!password)return json({error:'Invalid input'},400);if(s.users.some(function(u){return u.email===email}))return json({error:'Email already in use'},409);var id='demo-user-'+Date.now();var user={id:id,email:email,password:password};var ws={id:'demo-workspace-'+Date.now(),name:'My Workspace',owner_user_id:id};s.users.push(user);s.workspaces.push(ws);s.session=id;save(s);return json({user:{id:id,email:email},workspace:{id:ws.id,name:ws.name}})}
-if(pathname==='/api/auth/login'&&method==='POST'){var email2=String(body.email||'').trim().toLowerCase();var user2=s.users.find(function(u){return u.email===email2&&u.password===String(body.password||'')});if(!user2)return json({error:'Invalid credentials'},401);s.session=user2.id;save(s);return json({user:{id:user2.id,email:user2.email}})}
-if(pathname==='/api/auth/logout'&&method==='POST'){s.session=null;save(s);return json({ok:true})}
-if(pathname==='/api/auth/me'&&method==='GET'){var me=s.users.find(function(u){return u.id===s.session});return me?json({user:{id:me.id,email:me.email}}):json({error:'Not authenticated'},401)}
-if(pathname==='/api/workspaces'&&method==='GET'){if(!s.session)return json({error:'Not authenticated'},401);return json({workspaces:s.workspaces.filter(function(w){return w.owner_user_id===s.session||w.id==='demo-workspace'})})}
-if(pathname==='/api/workspaces'&&method==='POST'){if(!s.session)return json({error:'Not authenticated'},401);var ws2={id:'demo-workspace-'+Date.now(),name:String(body.name||'Untitled Workspace'),owner_user_id:s.session};s.workspaces.push(ws2);save(s);return json({workspace:{id:ws2.id,name:ws2.name}})}
-if(pathname==='/api/sync/action'&&method==='POST'){s.actions.push(body);save(s);return json({ok:true,applied:true,demo:true})}
-if(/\/api\/workspaces\/[^/]+\/export$/.test(pathname)&&method==='GET'){var wid=pathname.split('/')[3];var found=s.workspaces.find(function(w){return w.id===wid})||s.workspaces[0];return json({workspace:found,columns:[{id:'todo',title:'To do',position:0}],cards:s.actions.filter(function(a){return a.workspaceId===wid&&a.type==='create_card'}).map(function(a){return {id:a.id,column_id:'todo',title:a.payload&&a.payload.title||'New Card',content:a.payload&&a.payload.content||'',position:0}}),notes:[],comments:[]})}
-return json({error:'Demo endpoint not implemented',path:pathname},404)};
-var NativeWS=window.WebSocket;function DemoWS(url){this.url=String(url);this.readyState=0;this.OPEN=1;this.CLOSED=3;var self=this;setTimeout(function(){self.readyState=1;if(self.onopen)self.onopen({type:'open'});if(self.onmessage)self.onmessage({data:JSON.stringify({type:'presence',demo:true,users:1})})},50)}DemoWS.prototype.send=function(){};DemoWS.prototype.close=function(){this.readyState=3;if(this.onclose)this.onclose({type:'close'})};DemoWS.OPEN=1;DemoWS.CLOSED=3;window.WebSocket=function(url,protocols){return String(url).indexOf('/ws')>=0?new DemoWS(url):new NativeWS(url,protocols)};window.WebSocket.OPEN=1;window.WebSocket.CLOSED=3;
-function banner(){if(document.getElementById('codem8s-demo-banner'))return;var b=document.createElement('div');b.id='codem8s-demo-banner';b.textContent='Demo Backend • data stays in this preview';b.style.cssText='position:fixed;top:0;left:0;right:0;z-index:2147483646;background:#5b3df5;color:white;padding:7px 10px;text-align:center;font:12px system-ui';document.body.style.paddingTop='32px';document.body.appendChild(b)}if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',banner);else banner();
-})();<\/script>`;
+  return `<script>(function(){var KEY='codem8s:demo-backend:v1';function seed(){var s={users:[{id:'demo-alice',email:'alice@example.com',password:'password'}],session:null,workspaces:[{id:'demo-workspace',name:'Demo Workspace',owner_user_id:'demo-alice'}],actions:[]};save(s);return s}function load(){try{return JSON.parse(localStorage.getItem(KEY)||'null')||seed()}catch(e){return seed()}}function save(s){localStorage.setItem(KEY,JSON.stringify(s))}function json(data,status){return Promise.resolve(new Response(JSON.stringify(data),{status:status||200,headers:{'Content-Type':'application/json','X-Codem8s-Demo':'1'}}))}function bodyOf(init){try{return init&&init.body?JSON.parse(init.body):{}}catch(e){return {}}}var realFetch=window.fetch.bind(window);window.fetch=function(input,init){var raw=typeof input==='string'?input:(input&&input.url)||'';var url=new URL(raw,location.href);var p=url.pathname;var method=String((init&&init.method)||(input&&input.method)||'GET').toUpperCase();if(p.indexOf('/api/')!==0)return realFetch(input,init);var s=load();var body=bodyOf(init);if(p==='/api/auth/register'&&method==='POST'){var email=String(body.email||'').trim().toLowerCase();var password=String(body.password||'');if(!email||!password)return json({error:'Invalid input'},400);if(s.users.some(function(u){return u.email===email}))return json({error:'Email already in use'},409);var id='demo-user-'+Date.now();var user={id:id,email:email,password:password};var ws={id:'demo-workspace-'+Date.now(),name:'My Workspace',owner_user_id:id};s.users.push(user);s.workspaces.push(ws);s.session=id;save(s);return json({user:{id:id,email:email},workspace:{id:ws.id,name:ws.name}})}if(p==='/api/auth/login'&&method==='POST'){var email2=String(body.email||'').trim().toLowerCase();var user2=s.users.find(function(u){return u.email===email2&&u.password===String(body.password||'')});if(!user2)return json({error:'Invalid credentials'},401);s.session=user2.id;save(s);return json({user:{id:user2.id,email:user2.email}})}if(p==='/api/auth/logout'&&method==='POST'){s.session=null;save(s);return json({ok:true})}if(p==='/api/auth/me'&&method==='GET'){var me=s.users.find(function(u){return u.id===s.session});return me?json({user:{id:me.id,email:me.email}}):json({error:'Not authenticated'},401)}if(p==='/api/workspaces'&&method==='GET'){if(!s.session)return json({error:'Not authenticated'},401);return json({workspaces:s.workspaces.filter(function(w){return w.owner_user_id===s.session||w.id==='demo-workspace'})})}if(p==='/api/workspaces'&&method==='POST'){if(!s.session)return json({error:'Not authenticated'},401);var ws2={id:'demo-workspace-'+Date.now(),name:String(body.name||'Untitled Workspace'),owner_user_id:s.session};s.workspaces.push(ws2);save(s);return json({workspace:{id:ws2.id,name:ws2.name}})}if(p==='/api/sync/action'&&method==='POST'){s.actions.push(body);save(s);return json({ok:true,applied:true,demo:true})}return json({error:'Demo endpoint not implemented',path:p},404)};function banner(){if(document.getElementById('codem8s-demo-banner'))return;var b=document.createElement('div');b.id='codem8s-demo-banner';b.textContent='Demo Backend • data stays in this preview';b.style.cssText='position:fixed;top:0;left:0;right:0;z-index:2147483646;background:#5b3df5;color:white;padding:7px 10px;text-align:center;font:12px system-ui';document.body.style.paddingTop='32px';document.body.appendChild(b)}if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',banner);else banner()})();<\/script>`;
 }
 
 app.post('/api/build-preview', rateLimit, async (req, res) => {
@@ -207,7 +191,7 @@ app.post('/api/build-preview', rateLimit, async (req, res) => {
     const css = cssFile?.text || '';
     const style = css ? `<style>${css.replace(/<\/style/gi, '<\\/style')}</style>` : '';
     const compiled = `<script type="module">${js.replace(/<\/script/gi, '<\\/script')}</script>`;
-    const injected = `${runtimeGuard()}${demoBackendScript()}${style}${compiled}`;
+    const injected = `${runtimeGuard()}${demoBackendScript()}${mountGuard()}${style}${compiled}`;
     let html = frontend.htmlText.replace(/%PUBLIC_URL%\/?/g, '');
     if (frontend.moduleMatch) html = html.replace(frontend.moduleMatch[0], injected);
     else {
