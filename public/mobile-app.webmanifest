@@ -1,0 +1,18 @@
+{
+  "name": "Codem8s Mobile App",
+  "short_name": "Codem8s App",
+  "id": "/mobile-app.html",
+  "start_url": "/mobile-app.html",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#07101c",
+  "theme_color": "#07101c",
+  "icons": [
+    {
+      "src": "/codem8s-app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
