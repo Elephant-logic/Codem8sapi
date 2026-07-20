@@ -6,7 +6,7 @@ const app = express();
 const PORT = Number(process.env.PORT || 10000);
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const PUBLIC_DIR = path.join(__dirname, 'public');
-const VERSION = '10.5.3';
+const VERSION = '10.5.4';
 
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
@@ -35,7 +35,7 @@ app.get('/api/health', (_req, res) => {
     openaiConfigured: Boolean(OPENAI_API_KEY),
     service: 'codem8s-render',
     version: VERSION,
-    frameworkPreview: 'esbuild-direct-cdn'
+    frameworkPreview: 'esbuild-verified-output'
   });
 });
 
@@ -137,8 +137,7 @@ function packageVersions(files, root) {
 }
 
 function packageRoot(specifier) {
-  if (specifier.startsWith('@')) return specifier.split('/').slice(0, 2).join('/');
-  return specifier.split('/')[0];
+  return specifier.startsWith('@') ? specifier.split('/').slice(0, 2).join('/') : specifier.split('/')[0];
 }
 
 function cdnUrl(specifier, versions) {
@@ -165,7 +164,7 @@ function rewriteBareImports(js, versions) {
 }
 
 function runtimeGuard() {
-  return `<script>(function(){function show(message){var box=document.getElementById('codem8s-runtime-error');if(!box){box=document.createElement('div');box.id='codem8s-runtime-error';box.style.cssText='position:fixed;inset:0;z-index:2147483647;overflow:auto;background:#07101c;color:#eaf3ff;padding:24px;font:14px/1.5 system-ui';document.body.innerHTML='';document.body.appendChild(box)}box.innerHTML='<h2 style="color:#ff7892">Preview runtime error</h2><pre style="white-space:pre-wrap"></pre>';box.querySelector('pre').textContent=String(message||'Unknown runtime error')}window.addEventListener('error',function(e){show(e.message||e.error||'Script failed to load')});window.addEventListener('unhandledrejection',function(e){show(e.reason&&e.reason.message||e.reason||'Unhandled promise rejection')});setTimeout(function(){var root=document.getElementById('root');if(root&&!root.firstElementChild&&!root.textContent.trim())show('The app compiled but rendered nothing. A dependency or startup request may have failed.')},7000)})();<\/script>`;
+  return `<script>(function(){function show(message){var box=document.getElementById('codem8s-runtime-error');if(!box){box=document.createElement('div');box.id='codem8s-runtime-error';box.style.cssText='position:fixed;inset:0;z-index:2147483647;overflow:auto;background:#07101c;color:#eaf3ff;padding:24px;font:14px/1.5 system-ui';document.body.innerHTML='';document.body.appendChild(box)}box.innerHTML='<h2 style="color:#ff7892">Preview runtime error</h2><pre style="white-space:pre-wrap"></pre>';box.querySelector('pre').textContent=String(message||'Unknown runtime error')}window.addEventListener('error',function(e){show(e.message||e.error||'Script failed to load')});window.addEventListener('unhandledrejection',function(e){show(e.reason&&e.reason.message||e.reason||'Unhandled promise rejection')});setTimeout(function(){var root=document.getElementById('root');if(root&&!root.firstElementChild&&!root.textContent.trim())show('The app compiled but rendered nothing. A dependency or startup request may have failed.')},5000)})();<\/script>`;
 }
 
 app.post('/api/build-preview', rateLimit, async (req, res) => {
@@ -176,12 +175,8 @@ app.post('/api/build-preview', rateLimit, async (req, res) => {
       name: 'codem8s-virtual-project',
       setup(build) {
         build.onResolve({ filter: /.*/ }, (args) => {
-          if (args.kind === 'entry-point') {
-            return { path: frontend.entry, namespace: 'codem8s' };
-          }
-          if (!args.path.startsWith('.') && !args.path.startsWith('/')) {
-            return { path: args.path, external: true };
-          }
+          if (args.kind === 'entry-point') return { path: frontend.entry, namespace: 'codem8s' };
+          if (!args.path.startsWith('.') && !args.path.startsWith('/')) return { path: args.path, external: true };
           const found = findLocalFile(files, args.path, args.importer || frontend.entry);
           return found
             ? { path: found, namespace: 'codem8s' }
@@ -197,6 +192,7 @@ app.post('/api/build-preview', rateLimit, async (req, res) => {
 
     const result = await esbuild.build({
       entryPoints: [frontend.entry],
+      outfile: 'codem8s-preview.js',
       bundle: true,
       write: false,
       format: 'esm',
@@ -208,24 +204,33 @@ app.post('/api/build-preview', rateLimit, async (req, res) => {
       logLevel: 'silent'
     });
 
-    const rawJs = result.outputFiles.find((file) => file.path.endsWith('.js'))?.text || '';
-    const css = result.outputFiles.find((file) => file.path.endsWith('.css'))?.text || '';
+    const jsFile = result.outputFiles.find((file) => file.path.endsWith('.js')) || result.outputFiles[0];
+    const cssFile = result.outputFiles.find((file) => file.path.endsWith('.css'));
+    const rawJs = jsFile?.text || '';
+    if (!rawJs.trim()) throw new Error('The framework compiler returned an empty JavaScript bundle.');
+
     const versions = packageVersions(files, frontend.root);
     const js = rewriteBareImports(rawJs, versions);
+    const css = cssFile?.text || '';
     const style = css ? `<style>${css.replace(/<\/style/gi, '<\\/style')}</style>` : '';
     const compiled = `<script type="module">${js.replace(/<\/script/gi, '<\\/script')}</script>`;
     const injected = `${runtimeGuard()}${style}${compiled}`;
     let html = frontend.htmlText.replace(/%PUBLIC_URL%\/?/g, '');
 
-    if (frontend.moduleMatch) {
-      html = html.replace(frontend.moduleMatch[0], injected);
-    } else {
+    if (frontend.moduleMatch) html = html.replace(frontend.moduleMatch[0], injected);
+    else {
       const marker = html.toLowerCase().lastIndexOf('</body>');
       html = marker >= 0 ? html.slice(0, marker) + injected + html.slice(marker) : html + injected;
     }
 
     html = html.replace(/<link\b[^>]*href=["'][^"']*\.(?:css|scss|sass)["'][^>]*>/gi, '');
-    res.json({ ok: true, html, entry: frontend.entry, warnings: result.warnings.map((warning) => warning.text) });
+    res.json({
+      ok: true,
+      html,
+      entry: frontend.entry,
+      bundleBytes: Buffer.byteLength(js),
+      warnings: result.warnings.map((warning) => warning.text)
+    });
   } catch (error) {
     const details = Array.isArray(error?.errors) ? error.errors.map((item) => item.text).filter(Boolean) : [];
     res.status(400).json({ error: { message: error?.message || 'Framework preview failed.', details } });
