@@ -6,6 +6,7 @@ const originalSend = express.response.send;
 const TOKEN = process.env.GITHUB_APK_TOKEN || process.env.GITHUB_TOKEN || '';
 const REPO = process.env.GITHUB_APK_REPO || 'Elephant-logic/Codem8sapi';
 const BRANCH = process.env.GITHUB_APK_BRANCH || 'main';
+const WORKFLOW = 'build-vst3.yml';
 
 const safeId = value => String(value || 'instrument').replace(/[^a-z0-9_-]/gi, '-').slice(0, 48);
 const safeText = (value, fallback, max = 80) => String(value || fallback).replace(/[<>"'&]/g, '').trim().slice(0, max) || fallback;
@@ -31,6 +32,35 @@ async function githubApi(endpoint, options = {}) {
   return response;
 }
 
+async function dispatchWorkflow(owner, repo, id) {
+  await githubApi(`/repos/${owner}/${repo}/actions/workflows/${encodeURIComponent(WORKFLOW)}/dispatches`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ref: BRANCH, inputs: { request_id: id } })
+  });
+}
+
+async function workflowState(owner, repo, id) {
+  try {
+    const response = await githubApi(`/repos/${owner}/${repo}/actions/workflows/${encodeURIComponent(WORKFLOW)}/runs?event=workflow_dispatch&branch=${encodeURIComponent(BRANCH)}&per_page=30`);
+    const data = await response.json();
+    const run = (data.workflow_runs || []).find(item => String(item.display_title || '').includes(id));
+    if (!run) return { state: 'queued', workflowStarted: false };
+    if (run.status !== 'completed') return { state: run.status || 'building', workflowStarted: true, runUrl: run.html_url || '' };
+    if (run.conclusion === 'success') return { state: 'publishing', workflowStarted: true, runUrl: run.html_url || '' };
+    return {
+      state: 'failed',
+      failed: true,
+      workflowStarted: true,
+      conclusion: run.conclusion || 'failure',
+      runUrl: run.html_url || '',
+      message: `GitHub VST3 build ${run.conclusion || 'failed'}. Open the workflow run for details.`
+    };
+  } catch {
+    return { state: 'building', workflowStarted: true };
+  }
+}
+
 function registerRoutes(app) {
   if (app.__codem8sVstRoutes) return;
   app.__codem8sVstRoutes = true;
@@ -51,7 +81,13 @@ function registerRoutes(app) {
         body: JSON.stringify({ message: `vst-build:${id}`, content: Buffer.from(JSON.stringify(request)).toString('base64'), branch: BRANCH })
       });
       const data = await response.json();
-      res.status(202).json({ id, commitSha: data?.commit?.sha || '', statusUrl: `/api/vst-builds/${encodeURIComponent(id)}` });
+      try {
+        await dispatchWorkflow(owner, repo, id);
+      } catch (error) {
+        error.message = `The VST request was saved, but GitHub could not start the workflow. Ensure the Render token has Actions: write permission. ${error.message}`;
+        throw error;
+      }
+      res.status(202).json({ id, commitSha: data?.commit?.sha || '', state: 'queued', workflowStarted: true, statusUrl: `/api/vst-builds/${encodeURIComponent(id)}` });
     } catch (error) {
       console.error('VST3 build request failed:', error?.message || error);
       res.status(error?.status || 502).json({ error: { message: error?.message || 'VST3 build request failed.' } });
@@ -59,18 +95,20 @@ function registerRoutes(app) {
   });
 
   app.get('/api/vst-builds/:id', async (req, res) => {
+    const id = safeId(req.params.id);
+    const [owner, repo] = REPO.split('/');
     try {
-      const id = safeId(req.params.id);
-      const [owner, repo] = REPO.split('/');
       const response = await githubApi(`/repos/${owner}/${repo}/releases/tags/vst-${encodeURIComponent(id)}`);
       const release = await response.json();
       const assets = Array.isArray(release.assets) ? release.assets.filter(item => /\.zip$/i.test(String(item.name || ''))) : [];
-      if (!assets.length) return res.json({ id, state: 'building', ready: false });
-      res.json({ id, state: 'ready', ready: true, downloads: assets.map(asset => ({ name: asset.name, url: `/api/vst-builds/${encodeURIComponent(id)}/download/${asset.id}` })) });
+      if (assets.length) {
+        return res.json({ id, state: 'ready', ready: true, downloads: assets.map(asset => ({ name: asset.name, url: `/api/vst-builds/${encodeURIComponent(id)}/download/${asset.id}` })) });
+      }
     } catch (error) {
-      if (error?.status === 404) return res.json({ id: safeId(req.params.id), state: 'building', ready: false });
-      res.status(error?.status || 502).json({ error: { message: error?.message || 'Could not check VST3 status.' } });
+      if (error?.status !== 404) return res.status(error?.status || 502).json({ error: { message: error?.message || 'Could not check VST3 status.' } });
     }
+    const status = await workflowState(owner, repo, id);
+    res.json({ id, ready: false, ...status });
   });
 
   app.get('/api/vst-builds/:id/download/:assetId', async (req, res) => {
@@ -97,7 +135,7 @@ express.application.get = function codem8sVstRoutes(route, ...handlers) {
 
 express.response.send = function codem8sVstHostSend(body) {
   if (typeof body === 'string' && body.includes('id="codem8s-app"') && !body.includes('host-vst-builder-v1.js')) {
-    body = body.replace('</body>', '<script src="/host-vst-builder-v1.js?v=1.0.0"></script></body>');
+    body = body.replace('</body>', '<script src="/host-vst-builder-v1.js?v=1.1.0"></script></body>');
   }
   return originalSend.call(this, body);
 };
