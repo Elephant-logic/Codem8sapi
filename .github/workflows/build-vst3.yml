@@ -76,20 +76,30 @@ jobs:
               text = text.replace('__PLUGIN_NAME__', name).replace('__MANUFACTURER__', maker).replace('__PLUGIN_ID__', safe).replace('__WAVEFORM__', '1')
               cmake.write_text(text, encoding='utf-8')
 
-          # Codem8s projects previously generated a non-existent JUCE v8.1.0 tag.
-          # Pin every JUCE FetchContent declaration to a real stable release.
           repaired = []
+          fetch_block = '''include(FetchContent)\nFetchContent_Declare(\n  JUCE\n  GIT_REPOSITORY https://github.com/juce-framework/JUCE.git\n  GIT_TAG 8.0.13\n  GIT_SHALLOW TRUE\n)\nFetchContent_MakeAvailable(JUCE)'''
           for cmake in build.rglob('CMakeLists.txt'):
               text = cmake.read_text(encoding='utf-8')
               original = text
               text = re.sub(r'(GIT_REPOSITORY\s+https?://github\.com/juce-framework/JUCE(?:\.git)?[\s\S]{0,300}?GIT_TAG\s+)(?:v?8\.1\.0|master|main)', r'\g<1>8.0.13', text, flags=re.IGNORECASE)
               text = text.replace('GIT_TAG v8.1.0', 'GIT_TAG 8.0.13').replace('GIT_TAG 8.1.0', 'GIT_TAG 8.0.13')
+              external = re.search(r'add_subdirectory\s*\(\s*\$\{JUCE_DIR\}[^)]*\)', text, flags=re.IGNORECASE)
+              if external:
+                  text = re.sub(r'if\s*\(\s*NOT\s+DEFINED\s+JUCE_DIR\s*\)[\s\S]*?endif\s*\(\s*\)?', '', text, count=1, flags=re.IGNORECASE)
+                  text = re.sub(r'add_subdirectory\s*\(\s*\$\{JUCE_DIR\}[^)]*\)', fetch_block, text, count=1, flags=re.IGNORECASE)
               if text != original:
                   cmake.write_text(text, encoding='utf-8')
                   repaired.append(str(cmake))
           if repaired:
-              print('Repaired JUCE tag to 8.0.13 in:')
+              print('Repaired JUCE dependency configuration in:')
               print('\n'.join(repaired))
+
+          plugin_type = str(data.get('pluginType', 'instrument'))
+          if plugin_type in {'instrument', 'sampler', 'drum-machine'}:
+              cpp_text = '\n'.join(p.read_text(encoding='utf-8', errors='ignore') for p in build.rglob('*.cpp'))
+              silent_webview = ('buffer.clear()' in cpp_text and ('synthesis is in WebView' in cpp_text or 'Web Audio API' in cpp_text))
+              if silent_webview:
+                  raise SystemExit('This project is not a real native VSTi yet: processBlock clears the audio buffer and the sound only runs in a browser WebView. Remake it with native JUCE DSP before building.')
 
           cmakes = sorted(build.rglob('CMakeLists.txt'), key=lambda p: (len(p.parts), len(str(p))))
           if not cmakes: raise SystemExit('No CMakeLists.txt was found in the saved project.')
@@ -97,10 +107,10 @@ jobs:
           with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as env:
               env.write(f"ID={data.get('id','plugin')}\n")
               env.write(f"NAME={data.get('name','Codem8s Plugin')}\n")
-              env.write(f"PLUGIN_TYPE={data.get('pluginType','instrument')}\n")
+              env.write(f"PLUGIN_TYPE={plugin_type}\n")
               env.write(f"SOURCE_DIR={source_dir.as_posix()}\n")
           print(f"Build source: {source}")
-          print(f"Plugin type: {data.get('pluginType','instrument')}")
+          print(f"Plugin type: {plugin_type}")
           print(f"Project files: {data.get('fileCount', 0)}")
           print(f"CMake source: {source_dir}")
           PY
