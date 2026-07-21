@@ -10,7 +10,7 @@
     return new Promise(resolve => {
       const panel = document.createElement('div');
       panel.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:#020711ed;padding:16px;overflow:auto;color:#edf5ff;font-family:system-ui';
-      panel.innerHTML = `<div style="max-width:540px;margin:28px auto;background:#0d1727;border:1px solid #365477;border-radius:20px;padding:20px;display:grid;gap:14px;box-shadow:0 25px 80px #000"><h2 style="margin:0">Build VST3 Instrument</h2><p style="margin:0;color:#9db0c8">Create a desktop virtual instrument for Windows, macOS and Linux.</p><label style="display:grid;gap:6px;font-weight:800">Plugin name<input data-name value="${esc(item?.name || 'Codem8s Instrument')}" style="padding:12px;border-radius:11px;border:1px solid #365477;background:#07111f;color:#edf5ff"></label><label style="display:grid;gap:6px;font-weight:800">Manufacturer<input data-maker value="Codem8s" style="padding:12px;border-radius:11px;border:1px solid #365477;background:#07111f;color:#edf5ff"></label><label style="display:grid;gap:6px;font-weight:800">Instrument description<textarea data-description rows="3" style="padding:12px;border-radius:11px;border:1px solid #365477;background:#07111f;color:#edf5ff">A playable software synthesizer generated from this Codem8s project.</textarea></label><label style="display:grid;gap:6px;font-weight:800">Oscillator<select data-wave style="padding:12px;border-radius:11px;border:1px solid #365477;background:#07111f;color:#edf5ff"><option value="saw">Saw</option><option value="sine">Sine</option><option value="square">Square</option><option value="triangle">Triangle</option></select></label><div style="padding:11px;border-radius:11px;background:#07111f;color:#9db0c8;font-size:13px">The first version builds a playable synth with ADSR, gain and MIDI input. GitHub creates separate downloadable VST3 ZIP files.</div><div data-error style="min-height:20px;color:#ff7892"></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:9px"><button data-cancel style="padding:12px;border-radius:11px;border:1px solid #365477;background:#142843;color:#edf5ff;font-weight:800">Cancel</button><button data-build style="padding:12px;border:0;border-radius:11px;background:linear-gradient(135deg,#64dcff,#927cff);color:#06101b;font-weight:900">Build VST3</button></div></div>`;
+      panel.innerHTML = `<div style="max-width:540px;margin:28px auto;background:#0d1727;border:1px solid #365477;border-radius:20px;padding:20px;display:grid;gap:14px;box-shadow:0 25px 80px #000"><h2 style="margin:0">Build VST3 Instrument</h2><p style="margin:0;color:#9db0c8">Create a desktop virtual instrument for Windows, macOS and Linux.</p><label style="display:grid;gap:6px;font-weight:800">Plugin name<input data-name value="${esc(item?.name || 'Codem8s Instrument')}" style="padding:12px;border-radius:11px;border:1px solid #365477;background:#07111f;color:#edf5ff"></label><label style="display:grid;gap:6px;font-weight:800">Manufacturer<input data-maker value="Codem8s" style="padding:12px;border-radius:11px;border:1px solid #365477;background:#07111f;color:#edf5ff"></label><label style="display:grid;gap:6px;font-weight:800">Instrument description<textarea data-description rows="3" style="padding:12px;border-radius:11px;border:1px solid #365477;background:#07111f;color:#edf5ff">A playable software synthesizer generated from this Codem8s project.</textarea></label><label style="display:grid;gap:6px;font-weight:800">Oscillator<select data-wave style="padding:12px;border-radius:11px;border:1px solid #365477;background:#07111f;color:#edf5ff"><option value="saw">Saw</option><option value="sine">Sine</option><option value="square">Square</option><option value="triangle">Triangle</option></select></label><div style="padding:11px;border-radius:11px;background:#07111f;color:#9db0c8;font-size:13px">GitHub builds separate VST3 ZIP files for Windows, macOS and Linux.</div><div data-error style="min-height:20px;color:#ff7892"></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:9px"><button data-cancel style="padding:12px;border-radius:11px;border:1px solid #365477;background:#142843;color:#edf5ff;font-weight:800">Cancel</button><button data-build style="padding:12px;border:0;border-radius:11px;background:linear-gradient(135deg,#64dcff,#927cff);color:#06101b;font-weight:900">Build VST3</button></div></div>`;
       document.body.appendChild(panel);
       const error = panel.querySelector('[data-error]');
       panel.querySelector('[data-cancel]').onclick = () => { panel.remove(); resolve(null); };
@@ -44,6 +44,18 @@
     return data;
   }
 
+  function addWorkflowLink(ui, url) {
+    if (!url || ui.actions.querySelector('[data-workflow-link]')) return;
+    const link = document.createElement('a');
+    link.dataset.workflowLink = '1';
+    link.href = url;
+    link.target = '_blank';
+    link.rel = 'noopener';
+    link.textContent = 'Open GitHub build log';
+    link.style.cssText = 'display:block;text-align:center;padding:12px;border-radius:11px;border:1px solid #365477;background:#142843;color:#edf5ff;font-weight:800;text-decoration:none';
+    ui.actions.insertBefore(link, ui.actions.lastElementChild);
+  }
+
   async function build(id) {
     const item = apps().find(app => app.id === id);
     if (!item) return;
@@ -52,22 +64,29 @@
     const ui = progress(chosen.name);
     try {
       const started = await requestJson('/api/vst-builds', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ appId: item.id, ...chosen }) });
-      ui.state.textContent = 'GitHub is compiling VST3 plugins for Windows, macOS and Linux. This can take several minutes.';
+      ui.state.textContent = 'GitHub workflow queued. Waiting for a build runner…';
       const begin = Date.now();
-      while (Date.now() - begin < 20 * 60 * 1000) {
+      while (Date.now() - begin < 35 * 60 * 1000) {
         await new Promise(resolve => setTimeout(resolve, 7000));
         const status = await requestJson(`/api/vst-builds/${encodeURIComponent(started.id)}`);
-        if (!status.ready) continue;
-        ui.state.textContent = 'VST3 builds are ready. Download the ZIP for your computer.';
-        for (const file of status.downloads || []) {
-          const link = document.createElement('a');
-          link.href = file.url; link.textContent = `Download ${file.name}`;
-          link.style.cssText = 'display:block;text-align:center;padding:13px;border-radius:11px;background:linear-gradient(135deg,#64dcff,#927cff);color:#06101b;font-weight:900;text-decoration:none';
-          ui.actions.insertBefore(link, ui.actions.firstChild);
+        addWorkflowLink(ui, status.runUrl);
+        if (status.failed) throw new Error(status.message || `GitHub VST3 build ${status.conclusion || 'failed'}.`);
+        if (status.ready) {
+          ui.state.textContent = 'VST3 builds are ready. Download the ZIP for your computer.';
+          for (const file of status.downloads || []) {
+            const link = document.createElement('a');
+            link.href = file.url; link.textContent = `Download ${file.name}`;
+            link.style.cssText = 'display:block;text-align:center;padding:13px;border-radius:11px;background:linear-gradient(135deg,#64dcff,#927cff);color:#06101b;font-weight:900;text-decoration:none';
+            ui.actions.insertBefore(link, ui.actions.firstChild);
+          }
+          return;
         }
-        return;
+        if (status.workflowStarted === false) ui.state.textContent = 'Build request saved. Waiting for GitHub Actions to start…';
+        else if (status.state === 'queued') ui.state.textContent = 'GitHub workflow queued. Waiting for a runner…';
+        else if (status.state === 'in_progress' || status.state === 'building') ui.state.textContent = 'GitHub is compiling the Windows, macOS and Linux VST3 builds…';
+        else if (status.state === 'publishing') ui.state.textContent = 'Compilation finished. Publishing downloadable ZIP files…';
       }
-      throw new Error('The VST3 build is taking longer than expected. You can close this panel and try again later.');
+      throw new Error('GitHub did not finish the VST3 build within 35 minutes. Open the GitHub build log to see its current state.');
     } catch (error) {
       ui.state.textContent = error.message || 'VST3 build failed.';
       ui.state.style.color = '#ff7892';
