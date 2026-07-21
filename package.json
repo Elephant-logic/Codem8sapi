@@ -2,9 +2,9 @@
   "name": "codem8s-render",
   "version": "10.7.1",
   "private": true,
-  "description": "Render-ready Codem8s with secure OpenAI proxy, build requirements, safe framework previews, and enforced UI quality.",
-  "main": "bootstrap.js",
-  "scripts": {"start": "node bootstrap.js"},
+  "description": "Render-ready Codem8s with secure OpenAI proxy, APK and VST3 builders, safe framework previews, and enforced UI quality.",
+  "main": "vst-entry.js",
+  "scripts": {"start": "node vst-entry.js"},
   "engines": {"node": ">=20 <25"},
   "dependencies": {"esbuild": "^0.25.6", "express": "^4.21.2"}
 }
