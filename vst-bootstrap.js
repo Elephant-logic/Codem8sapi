@@ -134,6 +134,13 @@ function registerRoutes(app) {
 
 express.application.get = function codem8sVstRoutes(route, ...handlers) { if (route === '*') registerRoutes(this); return originalGet.call(this, route, ...handlers); };
 express.response.send = function codem8sVstHostSend(body) {
-  if (typeof body === 'string' && body.includes('id="codem8s-app"') && !body.includes('host-vst-builder-v1.js')) body = body.replace('</body>', '<script src="/host-vst-builder-v1.js?v=1.2.0"></script></body>');
+  if (typeof body === 'string' && body.includes('id="codem8s-app"')) {
+    const current = '<script src="/host-vst-builder-v1.js?v=1.3.0"></script>';
+    if (/<script\b[^>]*src=["']\/host-vst-builder-v1\.js(?:\?[^"']*)?["'][^>]*><\/script>/i.test(body)) {
+      body = body.replace(/<script\b[^>]*src=["']\/host-vst-builder-v1\.js(?:\?[^"']*)?["'][^>]*><\/script>/gi, current);
+    } else {
+      body = body.replace('</body>', `${current}</body>`);
+    }
+  }
   return originalSend.call(this, body);
 };
