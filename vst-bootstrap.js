@@ -17,13 +17,7 @@ async function githubApi(endpoint, options = {}) {
   if (!TOKEN) throw new Error('GITHUB_APK_TOKEN is not configured in Render. The same token is used for VST3 builds.');
   const response = await fetch(`https://api.github.com${endpoint}`, {
     ...options,
-    headers: {
-      Accept: 'application/vnd.github+json',
-      Authorization: `Bearer ${TOKEN}`,
-      'X-GitHub-Api-Version': '2022-11-28',
-      'User-Agent': 'Codem8s-VST3-Builder',
-      ...(options.headers || {})
-    }
+    headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${TOKEN}`, 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'Codem8s-VST3-Builder', ...(options.headers || {}) }
   });
   if (!response.ok) {
     const text = await response.text().catch(() => '');
@@ -36,8 +30,7 @@ async function githubApi(endpoint, options = {}) {
 
 async function dispatchWorkflow(owner, repo, id) {
   await githubApi(`/repos/${owner}/${repo}/actions/workflows/${encodeURIComponent(WORKFLOW)}/dispatches`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ref: BRANCH, inputs: { request_id: id } })
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ref: BRANCH, inputs: { request_id: id } })
   });
 }
 
@@ -73,6 +66,23 @@ function hasJuceProject(files) {
   return /juce_add_plugin|AudioProcessor|VST3/i.test(sample);
 }
 
+function missingCmakeFiles(files) {
+  const names = new Set(Object.keys(files).map(name => name.toLowerCase()));
+  const missing = new Set();
+  for (const [cmakeName, text] of Object.entries(files)) {
+    if (!/(^|\/)CMakeLists\.txt$/i.test(cmakeName)) continue;
+    const base = cmakeName.includes('/') ? cmakeName.slice(0, cmakeName.lastIndexOf('/') + 1) : '';
+    const regex = /(?:^|[\s(])([A-Za-z0-9_.\/-]+\.(?:cpp|cxx|cc|h|hpp|mm|m))(?:[\s)\n\r]|$)/g;
+    let match;
+    while ((match = regex.exec(String(text || '')))) {
+      const ref = match[1].replace(/^\.\//, '');
+      const full = (base + ref).replace(/\/\.\//g, '/');
+      if (!names.has(full.toLowerCase())) missing.add(full);
+    }
+  }
+  return [...missing];
+}
+
 function registerRoutes(app) {
   if (app.__codem8sVstRoutes) return;
   app.__codem8sVstRoutes = true;
@@ -87,6 +97,10 @@ function registerRoutes(app) {
       const files = cleanFiles(req.body?.files);
       const buildSource = req.body?.buildSource === 'saved-project' && hasJuceProject(files) ? 'saved-project' : 'template';
       if (buildSource === 'template' && pluginType !== 'instrument') return res.status(400).json({ error: { message: 'This plugin type requires a saved JUCE/CMake project.' } });
+      if (buildSource === 'saved-project') {
+        const missing = missingCmakeFiles(files);
+        if (missing.length) return res.status(400).json({ error: { message: `The JUCE project snapshot is incomplete. Missing referenced files: ${missing.slice(0, 8).join(', ')}${missing.length > 8 ? '…' : ''}. Re-open or re-import the complete project, then save it again.` } });
+      }
       const payloadBytes = Buffer.byteLength(JSON.stringify(files));
       if (payloadBytes > 8_000_000) return res.status(413).json({ error: { message: 'The JUCE project is over the 8 MB source limit. Remove generated files, build folders and large binary assets.' } });
       const id = `${safeId(req.body?.appId || name)}-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`;
@@ -94,8 +108,7 @@ function registerRoutes(app) {
       const request = { id, name, manufacturer, description, pluginType, buildSource, fileCount: Object.keys(files).length, filesGzipBase64 };
       const [owner, repo] = REPO.split('/');
       const response = await githubApi(`/repos/${owner}/${repo}/contents/vst-build-requests/${encodeURIComponent(id)}.json`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: `vst-build:${id}`, content: Buffer.from(JSON.stringify(request)).toString('base64'), branch: BRANCH })
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: `vst-build:${id}`, content: Buffer.from(JSON.stringify(request)).toString('base64'), branch: BRANCH })
       });
       const data = await response.json();
       try { await dispatchWorkflow(owner, repo, id); }
@@ -135,12 +148,9 @@ function registerRoutes(app) {
 express.application.get = function codem8sVstRoutes(route, ...handlers) { if (route === '*') registerRoutes(this); return originalGet.call(this, route, ...handlers); };
 express.response.send = function codem8sVstHostSend(body) {
   if (typeof body === 'string' && body.includes('id="codem8s-app"')) {
-    const current = '<script src="/host-vst-builder-v1.js?v=1.3.0"></script>';
-    if (/<script\b[^>]*src=["']\/host-vst-builder-v1\.js(?:\?[^"']*)?["'][^>]*><\/script>/i.test(body)) {
-      body = body.replace(/<script\b[^>]*src=["']\/host-vst-builder-v1\.js(?:\?[^"']*)?["'][^>]*><\/script>/gi, current);
-    } else {
-      body = body.replace('</body>', `${current}</body>`);
-    }
+    const current = '<script src="/host-vst-builder-v1.js?v=1.4.0"></script>';
+    if (/<script\b[^>]*src=["']\/host-vst-builder-v1\.js(?:\?[^"']*)?["'][^>]*><\/script>/i.test(body)) body = body.replace(/<script\b[^>]*src=["']\/host-vst-builder-v1\.js(?:\?[^"']*)?["'][^>]*><\/script>/gi, current);
+    else body = body.replace('</body>', `${current}</body>`);
   }
   return originalSend.call(this, body);
 };
