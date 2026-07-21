@@ -33,10 +33,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libjack-jackd2-dev ladspa-sdk libcurl4-openssl-dev libfreetype6-dev libx11-dev libxcomposite-dev libxcursor-dev libxext-dev libxinerama-dev libxrandr-dev libxrender-dev libwebkit2gtk-4.1-dev libglu1-mesa-dev mesa-common-dev
-      - name: Read request and prepare project
+
+      - name: Read request and restore project
         shell: bash
         run: |
           if [ -n "$REQUEST_ID" ]; then
@@ -46,33 +48,82 @@ jobs:
             if [ -z "$FILE" ]; then FILE=$(ls -t vst-build-requests/*.json | head -1); fi
           fi
           test -f "$FILE" || { echo "VST request not found: $FILE"; exit 1; }
-          ID=$(jq -r '.id' "$FILE")
-          NAME=$(jq -r '.name' "$FILE")
-          MAKER=$(jq -r '.manufacturer' "$FILE")
-          WAVE=$(jq -r '.waveform' "$FILE")
-          case "$WAVE" in sine) WAVE_ID=0;; saw) WAVE_ID=1;; square) WAVE_ID=2;; *) WAVE_ID=3;; esac
-          SAFE=$(echo "$NAME" | tr -cd '[:alnum:]' | tr '[:upper:]' '[:lower:]')
-          cp -R vst-template vst-build
-          sed -i.bak "s/__PLUGIN_NAME__/$NAME/g; s/__MANUFACTURER__/$MAKER/g; s/__PLUGIN_ID__/$SAFE/g; s/__WAVEFORM__/$WAVE_ID/g" vst-build/CMakeLists.txt || true
-          rm -f vst-build/CMakeLists.txt.bak
-          echo "ID=$ID" >> "$GITHUB_ENV"
-          echo "NAME=$NAME" >> "$GITHUB_ENV"
+          python - "$FILE" <<'PY'
+          import base64, gzip, json, os, pathlib, shutil, sys
+          request_file = pathlib.Path(sys.argv[1])
+          data = json.loads(request_file.read_text(encoding='utf-8'))
+          build = pathlib.Path('vst-build')
+          if build.exists(): shutil.rmtree(build)
+          source = data.get('buildSource', 'template')
+          if source == 'saved-project':
+              encoded = data.get('filesGzipBase64', '')
+              if not encoded: raise SystemExit('Saved-project request contains no project files.')
+              files = json.loads(gzip.decompress(base64.b64decode(encoded)).decode('utf-8'))
+              if not isinstance(files, dict) or not files: raise SystemExit('Saved-project request is empty.')
+              for name, content in files.items():
+                  clean = pathlib.PurePosixPath(str(name))
+                  if clean.is_absolute() or '..' in clean.parts: raise SystemExit(f'Unsafe project path: {name}')
+                  target = build.joinpath(*clean.parts)
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  target.write_text(str(content), encoding='utf-8')
+          else:
+              shutil.copytree('vst-template', build)
+              name = str(data.get('name') or 'Codem8s Instrument')
+              maker = str(data.get('manufacturer') or 'Codem8s')
+              safe = ''.join(c for c in name.lower() if c.isalnum()) or 'codem8splugin'
+              cmake = build / 'CMakeLists.txt'
+              text = cmake.read_text(encoding='utf-8')
+              text = text.replace('__PLUGIN_NAME__', name).replace('__MANUFACTURER__', maker).replace('__PLUGIN_ID__', safe).replace('__WAVEFORM__', '1')
+              cmake.write_text(text, encoding='utf-8')
+          cmakes = sorted(build.rglob('CMakeLists.txt'), key=lambda p: (len(p.parts), len(str(p))))
+          if not cmakes: raise SystemExit('No CMakeLists.txt was found in the saved project.')
+          source_dir = cmakes[0].parent
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as env:
+              env.write(f"ID={data.get('id','plugin')}\n")
+              env.write(f"NAME={data.get('name','Codem8s Plugin')}\n")
+              env.write(f"PLUGIN_TYPE={data.get('pluginType','instrument')}\n")
+              env.write(f"SOURCE_DIR={source_dir.as_posix()}\n")
+          print(f"Build source: {source}")
+          print(f"Plugin type: {data.get('pluginType','instrument')}")
+          print(f"Project files: {data.get('fileCount', 0)}")
+          print(f"CMake source: {source_dir}")
+          PY
+
       - name: Configure
-        run: cmake -S vst-build -B vst-build/out -DCMAKE_BUILD_TYPE=Release
+        shell: bash
+        run: cmake -S "$SOURCE_DIR" -B vst-build/out -DCMAKE_BUILD_TYPE=Release
+
       - name: Build
+        shell: bash
         run: cmake --build vst-build/out --config Release --parallel 2
-      - name: Package
+
+      - name: Package VST3
         shell: bash
         run: |
           mkdir -p package
-          FOUND=0
-          while IFS= read -r -d '' item; do
-            cp -R "$item" package/
-            FOUND=1
-          done < <(find vst-build/out \( -type d -o -type f \) -name '*.vst3' -print0)
-          test "$FOUND" = 1 || { echo 'No VST3 output was produced.'; find vst-build/out -maxdepth 5 -type f | head -100; exit 1; }
+          python - <<'PY'
+          import pathlib, shutil
+          root = pathlib.Path('vst-build/out')
+          package = pathlib.Path('package')
+          found = []
+          for item in root.rglob('*.vst3'):
+              destination = package / item.name
+              if destination.exists():
+                  if destination.is_dir(): shutil.rmtree(destination)
+                  else: destination.unlink()
+              if item.is_dir(): shutil.copytree(item, destination)
+              else: shutil.copy2(item, destination)
+              found.append(str(item))
+          if not found:
+              print('Files produced by the build:')
+              for item in list(root.rglob('*'))[:200]: print(item)
+              raise SystemExit('No VST3 output was produced.')
+          print('VST3 outputs:')
+          print('\n'.join(found))
+          PY
           cd package
           7z a "../${ID}-${{ matrix.label }}.zip" .
+
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ID }}-${{ matrix.label }}
@@ -95,6 +146,7 @@ jobs:
           test -f "$FILE" || { echo "VST request not found: $FILE"; exit 1; }
           echo "ID=$(jq -r '.id' "$FILE")" >> "$GITHUB_ENV"
           echo "NAME=$(jq -r '.name' "$FILE")" >> "$GITHUB_ENV"
+          echo "PLUGIN_TYPE=$(jq -r '.pluginType // "plugin"' "$FILE")" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@v4
         with:
           pattern: ${{ env.ID }}-*
@@ -105,4 +157,4 @@ jobs:
         run: |
           ls -la ./*.zip
           gh release delete "vst-$ID" --yes --cleanup-tag 2>/dev/null || true
-          gh release create "vst-$ID" ./*.zip --title "$NAME VST3" --notes "Cross-platform VST3 instrument generated by Codem8s. Unsigned development build."
+          gh release create "vst-$ID" ./*.zip --title "$NAME VST3" --notes "Cross-platform $PLUGIN_TYPE VST3 built from the saved Codem8s JUCE project. Unsigned development build."
